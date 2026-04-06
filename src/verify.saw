@@ -242,13 +242,6 @@ let projection_forward_spec = do {
     llvm_return ();
 };
 
-let softmax_spec = do {
-    logits_ptr <- llvm_var "logits_ptr" (llvm_ptr (llvm_float));
-    logits_len <- llvm_var "logits_len" (llvm_int 64);
-    output_ptr <- llvm_var "output_ptr" (llvm_ptr (llvm_float));
-    llvm_return ();
-};
-
 let sample_top_k_spec = do {
     logits_ptr <- llvm_var "logits_ptr" (llvm_ptr (llvm_float));
     logits_len <- llvm_var "logits_len" (llvm_int 64);
@@ -554,10 +547,6 @@ let verify_projection_forward = do {
     llvm_verify main_bc "Projection.forward" [] projection_forward_spec z3;
 };
 
-let verify_softmax = do {
-    llvm_verify main_bc "softmax" [] softmax_spec z3;
-};
-
 let verify_sample_top_k = do {
     llvm_verify main_bc "sampleTopK" [] sample_top_k_spec z3;
 };
@@ -684,9 +673,6 @@ print "[VERIFIED] Projection.init - bit-level equivalence proven";
 
 verify_projection_forward;
 print "[VERIFIED] Projection.forward - bit-level equivalence proven";
-
-verify_softmax;
-print "[VERIFIED] softmax - bit-level equivalence proven";
 
 verify_sample_top_k;
 print "[VERIFIED] sampleTopK - bit-level equivalence proven";

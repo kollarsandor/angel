@@ -454,8 +454,8 @@ projectionForward proj hidden hidden_len =
          else fpFromRational rmNearestTiesToEven (0 % 1)
        | v <- [0..MAX_TENSOR_SIZE-1] ]
 
-softmax : [MAX_TENSOR_SIZE]Float32 -> [64] -> [MAX_TENSOR_SIZE]Float32
-softmax logits len =
+normalizeProbs : [MAX_TENSOR_SIZE]Float32 -> [64] -> [MAX_TENSOR_SIZE]Float32
+normalizeProbs logits len =
     let max_val = foldl floatMax (logits @ 0) logits
         exp_vals = [ if i < len then floatExp (floatSub (logits @ i) max_val) else fpFromRational rmNearestTiesToEven (0 % 1) | i <- [0..MAX_TENSOR_SIZE-1] ]
         sum_exp = foldl floatAdd (fpFromRational rmNearestTiesToEven (0 % 1)) exp_vals
@@ -468,7 +468,7 @@ sampleTopK logits len k random =
     let sorted = sortBy (\a b -> floatGt (logits @ a) (logits @ b)) [0..MAX_TENSOR_SIZE-1]
         top_k_indices = take`{MAX_TENSOR_SIZE} sorted
         top_logits = [ logits @ (top_k_indices @ i) | i <- [0..MAX_TENSOR_SIZE-1] ]
-        probs = softmax top_logits k
+        probs = normalizeProbs top_logits k
         cumulative = scanl floatAdd (fpFromRational rmNearestTiesToEven (0 % 1)) probs
         random_f = fpFromInteger rmNearestTiesToEven random
         selected = findFirst (\i -> floatLt random_f (cumulative @ i)) [0..MAX_TENSOR_SIZE-1]

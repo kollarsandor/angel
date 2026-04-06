@@ -1243,51 +1243,6 @@ pub const Tensor = struct {
         return t;
     }
 
-    pub fn conv2d(self: *const Tensor, kernel: *const Tensor, allocator: Allocator, stride: [2]usize, padding: [2]usize) !Tensor {
-        if (self.shape.dims.len != 4 or kernel.shape.dims.len != 4 or self.shape.dims[3] != kernel.shape.dims[2]) return Error.InvalidConv2D;
-        const batch = self.shape.dims[0];
-        const in_h = self.shape.dims[1];
-        const in_w = self.shape.dims[2];
-        const in_c = self.shape.dims[3];
-        const k_h = kernel.shape.dims[0];
-        const k_w = kernel.shape.dims[1];
-        const out_c = kernel.shape.dims[3];
-        const out_h = ((in_h + 2 * padding[0] - k_h) / stride[0]) + 1;
-        const out_w = ((in_w + 2 * padding[1] - k_w) / stride[1]) + 1;
-        var output = try init(allocator, &.{ batch, out_h, out_w, out_c });
-
-        var padded_input = if (padding[0] > 0 or padding[1] > 0) try self.pad(allocator, &[_][2]usize{ .{ 0, 0 }, .{ padding[0], padding[0] }, .{ padding[1], padding[1] }, .{ 0, 0 } }) else self.*;
-        defer if (padding[0] > 0 or padding[1] > 0) padded_input.deinit();
-
-        var b: usize = 0;
-        while (b < batch) : (b += 1) {
-            var oh: usize = 0;
-            while (oh < out_h) : (oh += 1) {
-                var ow: usize = 0;
-                while (ow < out_w) : (ow += 1) {
-                    var oc: usize = 0;
-                    while (oc < out_c) : (oc += 1) {
-                        var sum_result: f32 = 0.0;
-                        var kh: usize = 0;
-                        while (kh < k_h) : (kh += 1) {
-                            var kw: usize = 0;
-                            while (kw < k_w) : (kw += 1) {
-                                var ic: usize = 0;
-                                while (ic < in_c) : (ic += 1) {
-                                    const ih = oh * stride[0] + kh;
-                                    const iw = ow * stride[1] + kw;
-                                    sum_result += try padded_input.get(&.{ b, ih, iw, ic }) * try kernel.get(&.{ kh, kw, ic, oc });
-                                }
-                            }
-                        }
-                        try output.set(&.{ b, oh, ow, oc }, sum_result);
-                    }
-                }
-            }
-        }
-        return output;
-    }
-
     pub fn pad(self: *const Tensor, allocator: Allocator, pads: []const [2]usize) !Tensor {
         if (pads.len != self.shape.dims.len) return Error.InvalidPads;
         var new_shape = try allocator.alloc(usize, self.shape.dims.len);

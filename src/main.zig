@@ -1176,8 +1176,8 @@ fn generateSyntheticSamples(allocator: std.mem.Allocator, mgt: *MGT, count: usiz
         "Az etikus AI fejlesztes fontos tarsadalmi kerdes.",
         "Deep learning requires large datasets.",
         "Gradient descent optimizes the loss function.",
-        "The attention mechanism allows the model to focus.",
-        "Transformers have revolutionized natural language processing.",
+        "Affine coupling transforms input distributions invertibly.",
+        "Normalizing flows preserve information through bijections.",
         "Backpropagation computes gradients efficiently.",
     };
 

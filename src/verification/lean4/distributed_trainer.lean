@@ -324,10 +324,6 @@ def cosApprox (t : Tensor n shape) : Tensor n shape := map (fun x => Fixed32_32.
 
 def tanApprox (t : Tensor n shape) : Tensor n shape := map (fun x => Fixed32_32.fromFloat (Float.tan (Fixed32_32.toFloat x))) t
 
-def sigmoidApprox (t : Tensor n shape) : Tensor n shape := map (fun x => Fixed32_32.fromFloat (1 / (1 + Float.exp (-(Fixed32_32.toFloat x))))) t
-
-def tanhApprox (t : Tensor n shape) : Tensor n shape := map (fun x => Fixed32_32.fromFloat (Float.tanh (Fixed32_32.toFloat x))) t
-
 theorem map_length (f : Fixed32_32 → Fixed32_32) (t : Tensor n shape) : (map f t).data.length = t.data.length := by simp only [map, Vector.length_map]
 
 theorem map_id (t : Tensor n shape) : map id t = t := by simp only [map, Vector.map_id]; rfl

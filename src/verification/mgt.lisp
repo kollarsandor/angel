@@ -3352,24 +3352,24 @@
            (equal (car (encode-with-bos-eos st text))
                   *special-bos*)))
 
-(defun attention-mask-from-tokens (tokens)
+(defun padding-mask-from-tokens (tokens)
   (declare (xargs :guard (nat-listp tokens)
                   :measure (len tokens)))
   (if (atom tokens)
       nil
     (cons (if (equal (car tokens) *special-pad*) 0 1)
-          (attention-mask-from-tokens (cdr tokens)))))
+          (padding-mask-from-tokens (cdr tokens)))))
 
-(defthm nat-listp-of-attention-mask
+(defthm nat-listp-of-padding-mask
   (implies (nat-listp tokens)
-           (nat-listp (attention-mask-from-tokens tokens)))
-  :hints (("Goal" :induct (attention-mask-from-tokens tokens))))
+           (nat-listp (padding-mask-from-tokens tokens)))
+  :hints (("Goal" :induct (padding-mask-from-tokens tokens))))
 
-(defthm len-of-attention-mask
+(defthm len-of-padding-mask
   (implies (nat-listp tokens)
-           (equal (len (attention-mask-from-tokens tokens))
+           (equal (len (padding-mask-from-tokens tokens))
                   (len tokens)))
-  :hints (("Goal" :induct (attention-mask-from-tokens tokens))))
+  :hints (("Goal" :induct (padding-mask-from-tokens tokens))))
 
 (defun count-active-tokens (mask)
   (declare (xargs :guard (nat-listp mask)
@@ -3430,7 +3430,7 @@
   (declare (xargs :guard (and (mgt-state-p st) (stringp text) (natp max-len))))
   (let* ((raw-tokens (encode-with-bos-eos st text))
          (tokens (pad-or-truncate raw-tokens max-len))
-         (mask (attention-mask-from-tokens tokens))
+         (mask (padding-mask-from-tokens tokens))
          (positions (make-position-ids (len tokens) 0))
          (type-ids (token-type-ids tokens 0)))
     (list tokens mask positions type-ids)))
