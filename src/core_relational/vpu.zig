@@ -1887,8 +1887,8 @@ pub const LNSValue = struct {
 };
 
 pub const LNSInstruction = union(enum) {
-    lns_convolve: struct { src1: usize, src2: usize, dst: usize, kernel_size: usize },
-    sparse_attention: struct { query: usize, key: usize, value: usize, dst: usize, sparsity: f64 },
+    rsf_scatter: struct { src: usize, dst: usize, perm_indices: usize },
+    rsf_affine_couple: struct { src: usize, dst: usize, s_weight: usize, t_weight: usize },
     tensor_load: struct { addr: usize, dst: usize },
     tensor_store: struct { src: usize, addr: usize },
     lns_add: struct { src1: usize, src2: usize, dst: usize },

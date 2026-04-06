@@ -1,0 +1,957 @@
+Íme a **teljes, fájlonkénti javítási útmutató** konkrét kóddal. Minden fájlt sorrendben veszek, a legkritikusabbtól az alacsony prioritásúig.
+
+---
+
+# 1. `src/hw/accel/main.fut` — TELJES ÁTÍRÁS
+
+**Jelenlegi állapot:** relu + layer_norm + egyszerű mátrixszorzás pipeline [1](#6-0) 
+
+**Cseréld le a teljes fájl tartalmát erre:**
+
+```futhark
+-- src/hw/accel/main.fut
+-- RSF GPU kernel — tiszta affin coupling, relu/layer_norm nélkül
+type f16 = f16
+
+-- Affin coupling forward: split → scale → multiply → translate → shift
+-- Ez pontosan a rsf.zig LayerCore.forwardInPlace GPU megfelelője
+let rsf_affine_coupling_forward [n][d] 
+    (input: [n][d]f16) 
+    (weights_s: [d/2][d/2]f16) 
+    (weights_t: [d/2][d/2]f16)
+    (s_bias: [d/2]f16)
+    (t_bias: [d/2]f16)
+    (clip_min: f16) 
+    (clip_max: f16) : *[n][d]f16 =
+  let half = d / 2
+  in map (\row ->
+    -- Split: x1 = row[0..half], x2 = row[half..d]
+    let x1 = take half row :> [d/2]f16
+    let x2 = drop half row :> [d/2]f16
+    -- Scale: s = exp(clip(W_s * x2 + b_s))
+    let scale = map2 (\j bias ->
+      let sum = bias f16.+ f16.sum (map2 (f16.*) weights_s[j] x2)
+      let clipped = f16.max clip_min (f16.min clip_max sum)
+      in f16.exp clipped
+    ) (iota half) s_bias :> [d/2]f16
+    -- y1 = x1 * scale
+    let y1 = map2 (f16.*) x1 scale
+    -- Translation: t = W_t * y1 + b_t
+    let trans = map2 (\j bias ->
+      bias f16.+ f16.sum (map2 (f16.*) weights_t[j] y1)
+    ) (iota half) t_bias :> [d/2]f16
+    -- y2 = x2 + t
+    let y2 = map2 (f16.+) x2 trans
+    -- Concatenate
+    in y1 ++ y2 :> [d]f16
+  ) input
+
+-- Affin coupling backward: a kimenetből rekonstruálja a bemenetet
+-- Ez a rsf.zig LayerCore.inverseInPlace GPU megfelelője
+let rsf_affine_coupling_backward [n][d]
+    (output: [n][d]f16)
+    (weights_s: [d/2][d/2]f16)
+    (weights_t: [d/2][d/2]f16)
+    (s_bias: [d/2]f16)
+    (t_bias: [d/2]f16)
+    (clip_min: f16)
+    (clip_max: f16) : *[n][d]f16 =
+  let half = d / 2
+  in map (\row ->
+    let y1 = take half row :> [d/2]f16
+    let y2 = drop half row :> [d/2]f16
+    -- Inverse translation: t = W_t * y1 + b_t, x2 = y2 - t
+    let trans = map2 (\j bias ->
+      bias f16.+ f16.sum (map2 (f16.*) weights_t[j] y1)
+    ) (iota half) t_bias :> [d/2]f16
+    let x2 = map2 (f16.-) y2 trans
+    -- Inverse scale: s = exp(clip(W_s * x2 + b_s)), x1 = y1 / s
+    let scale = map2 (\j bias ->
+      let sum = bias f16.+ f16.sum (map2 (f16.*) weights_s[j] x2)
+      let clipped = f16.max clip_min (f16.min clip_max sum)
+      in f16.exp clipped
+    ) (iota half) s_bias :> [d/2]f16
+    let x1 = map2 (f16./) y1 scale
+    in x1 ++ x2 :> [d]f16
+  ) output
+
+entry rsf_forward [n][d] 
+    (input: [n][d]f16) 
+    (weights_s: [d/2][d/2]f16) 
+    (weights_t: [d/2][d/2]f16)
+    (s_bias: [d/2]f16)
+    (t_bias: [d/2]f16)
+    (clip_min: f16)
+    (clip_max: f16) : *[n][d]f16 =
+  rsf_affine_coupling_forward input weights_s weights_t s_bias t_bias clip_min clip_max
+
+entry rsf_backward [n][d]
+    (output: [n][d]f16)
+    (weights_s: [d/2][d/2]f16)
+    (weights_t: [d/2][d/2]f16)
+    (s_bias: [d/2]f16)
+    (t_bias: [d/2]f16)
+    (clip_min: f16)
+    (clip_max: f16) : *[n][d]f16 =
+  rsf_affine_coupling_backward output weights_s weights_t s_bias t_bias clip_min clip_max
+
+-- Gradient számítás az affin coupling-hoz
+-- A gradienseket a rekonstruált bemenetből és a kimeneti gradiensből számolja
+entry rsf_grad [n][d]
+    (input: [n][d]f16)
+    (grad_output: [n][d]f16)
+    (weights_s: [d/2][d/2]f16)
+    (weights_t: [d/2][d/2]f16)
+    (s_bias: [d/2]f16)
+    (t_bias: [d/2]f16)
+    (clip_min: f16)
+    (clip_max: f16) : (*[d/2][d/2]f16, *[d/2][d/2]f16, *[d/2]f16, *[d/2]f16) =
+  let half = d / 2
+  -- Accumulate gradients across batch
+  let (grad_ws, grad_wt, grad_bs, grad_bt) =
+    loop (gws, gwt, gbs, gbt) = 
+      (replicate half (replicate half (f16.i32 0)),
+       replicate half (replicate half (f16.i32 0)),
+       replicate half (f16.i32 0),
+       replicate half (f16.i32 0))
+    for i < n do
+      let row = input[i]
+      let x1 = take half row :> [d/2]f16
+      let x2 = drop half row :> [d/2]f16
+      let grad_row = grad_output[i]
+      let g_y1 = take half grad_row :> [d/2]f16
+      let g_y2 = drop half grad_row :> [d/2]f16
+      -- scale = exp(clip(W_s * x2 + b_s))
+      let raw_s = map2 (\j bias ->
+        bias f16.+ f16.sum (map2 (f16.*) weights_s[j] x2)
+      ) (iota half) s_bias :> [d/2]f16
+      let scale = map (\s -> f16.exp (f16.max clip_min (f16.min clip_max s))) raw_s
+      let y1 = map2 (f16.*) x1 scale
+      -- grad_t_bias += g_y2
+      let gbt = map2 (f16.+) gbt g_y2
+      -- grad_wt[j][k] += g_y2[j] * y1[k]
+      let gwt = map2 (\gwt_row j ->
+        map2 (\w k -> w f16.+ g_y2[j] f16.* y1[k]) gwt_row (iota half)
+      ) gwt (iota half)
+      -- grad through scale: g_scale = g_y1 * x1
+      let g_scale = map2 (f16.*) g_y1 x1
+      -- grad through exp(clip(...)): g_raw_s = g_scale * scale (if not clipped)
+      let g_raw_s = map3 (\gs sc rs ->
+        if rs f16.< clip_min || rs f16.> clip_max then f16.i32 0
+        else gs f16.* sc
+      ) g_scale scale raw_s
+      -- grad_s_bias += g_raw_s
+      let gbs = map2 (f16.+) gbs g_raw_s
+      -- grad_ws[j][k] += g_raw_s[j] * x2[k]
+      let gws = map2 (\gws_row j ->
+        map2 (\w k -> w f16.+ g_raw_s[j] f16.* x2[k]) gws_row (iota half)
+      ) gws (iota half)
+      in (gws, gwt, gbs, gbt)
+  in (grad_ws, grad_wt, grad_bs, grad_bt)
+
+entry sfd_update [d] (weights: *[d][d]f16) (gradients: [d][d]f16) (learning_rate: f16) (momentum: f16) (velocity: *[d][d]f16) : (*[d][d]f16, *[d][d]f16) =
+  let new_velocity = map2 (map2 (\v g -> momentum f16.* v f16.+ learning_rate f16.* g)) velocity gradients
+  let new_weights = map2 (map2 (\w v -> w f16.- v)) weights new_velocity
+  in (new_weights, new_velocity)
+
+entry compute_loss [n][d] (output: [n][d]f16) (target: [n][d]f16) : f16 =
+  let squared_diff = map2 (map2 (\o t -> (o f16.- t) f16.* (o f16.- t))) output target
+  let total = f16.sum (flatten squared_diff)
+  let count = f16.i64 (n * d)
+  in total f16./ count
+
+entry accumulate_gradients [d] (grad1: *[d][d]f16) (grad2: [d][d]f16) : *[d][d]f16 =
+  map2 (map2 (f16.+)) grad1 grad2
+
+entry batch_forward [batch_size][seq_len][d] 
+    (inputs: [batch_size][seq_len][d]f16) 
+    (weights_s: [d/2][d/2]f16) 
+    (weights_t: [d/2][d/2]f16)
+    (s_bias: [d/2]f16)
+    (t_bias: [d/2]f16)
+    (clip_min: f16)
+    (clip_max: f16) : *[batch_size][seq_len][d]f16 =
+  map (\sample -> rsf_affine_coupling_forward sample weights_s weights_t s_bias t_bias clip_min clip_max) inputs
+
+entry batch_compute_loss [batch_size][seq_len][d] (outputs: [batch_size][seq_len][d]f16) (targets: [batch_size][seq_len][d]f16) : f16 =
+  let squared_diff = map2 (map2 (map2 (\o t -> (o f16.- t) f16.* (o f16.- t)))) outputs targets
+  let total = f16.sum (flatten (flatten squared_diff))
+  let count = f16.i64 (batch_size * seq_len * d)
+  in total f16./ count
+
+entry xavier_fill_inplace [d] (weights: *[d][d]f16) (seed: i32) : *[d][d]f16 =
+  let scale = f16.sqrt (f16.f32 2.0 f16./ f16.i64 d)
+  in map (\i ->
+    map (\j ->
+      let hash = (seed + i32.i64 i * 73856093 + i32.i64 j * 19349663) % 1000000
+      let normalized = (f16.i32 hash) f16./ (f16.i32 1000000) f16.- f16.f32 0.5
+      in normalized f16.* scale
+    ) (iota d)
+  ) (iota d)
+
+entry scale_weights_inplace [d] (weights: *[d][d]f16) (scale_factor: f16) : *[d][d]f16 =
+  map (map (\w -> w f16./ scale_factor)) weights
+
+-- TÖRÖLVE: relu, layer_norm, rsf_spectral_transform, rsf_temporal_transform
+-- TÖRÖLVE: rsf_grad_spectral, rsf_grad_temporal (egyszerű matmul gradiens)
+-- TÖRÖLVE: training_step (az új szignátúrával újra kell írni a Zig oldalon)
+```
+
+**Megjegyzés:** A Futhark `d/2` szintaxis nem feltétlenül működik közvetlenül — a tényleges implementációban `let half = d / 2` és explicit `take`/`drop` kell. A fenti kód a logikát mutatja; a pontos Futhark szintaxist a fordító igényei szerint kell finomítani.
+
+---
+
+# 2. `src/hw/accel/futhark_bindings.zig` — Szignátúra frissítés
+
+**Jelenlegi állapot:** [2](#6-1) 
+
+**Változtatások:**
+
+```zig
+// src/hw/accel/futhark_bindings.zig
+
+// --- TÖRÖLNI (65-68. sor) ---
+// pub extern "c" fn futhark_entry_apply_softmax(...) c_int;
+// pub extern "c" fn futhark_entry_apply_layer_norm(...) c_int;
+// pub extern "c" fn futhark_entry_apply_relu(...) c_int;
+// pub extern "c" fn futhark_entry_apply_gelu(...) c_int;
+
+// --- MÓDOSÍTANI (73-74. sor) — új szignátúra ---
+pub extern "c" fn futhark_entry_rsf_forward(
+    ctx: ?*struct_futhark_context,
+    out: ?*?*struct_futhark_f16_2d,
+    input: ?*struct_futhark_f16_2d,
+    weights_s: ?*struct_futhark_f16_2d,  // [d/2][d/2]
+    weights_t: ?*struct_futhark_f16_2d,  // [d/2][d/2]
+    s_bias: ?*struct_futhark_f16_1d,     // [d/2] — ÚJ
+    t_bias: ?*struct_futhark_f16_1d,     // [d/2] — ÚJ
+    clip_min: u16,                        // f16 bitcast — ÚJ
+    clip_max: u16,                        // f16 bitcast — ÚJ
+) c_int;
+
+pub extern "c" fn futhark_entry_rsf_backward(
+    ctx: ?*struct_futhark_context,
+    out: ?*?*struct_futhark_f16_2d,
+    output: ?*struct_futhark_f16_2d,
+    weights_s: ?*struct_futhark_f16_2d,
+    weights_t: ?*struct_futhark_f16_2d,
+    s_bias: ?*struct_futhark_f16_1d,
+    t_bias: ?*struct_futhark_f16_1d,
+    clip_min: u16,
+    clip_max: u16,
+) c_int;
+
+// --- TÖRÖLNI (76-91. sor) — régi training_step ---
+// A training_step-et a Zig oldalon kell újraépíteni
+// az rsf_forward + rsf_grad + sfd_update hívások kombinációjával
+```
+
+**Megtartandó:** 62-64. sor (`futhark_entry_matmul`, `futhark_entry_batch_matmul`, `futhark_entry_dot`) — ezek általános lineáris algebra, nem NN primitívek. [3](#6-2) 
+
+---
+
+# 3. `src/hw/accel/accel_interface.zig` — RSFAccelerator + GPUOps
+
+### 3a. `RSFAccelerator` struct bővítése (344-382. sor) [4](#6-3) 
+
+```zig
+// src/hw/accel/accel_interface.zig — RSFAccelerator struct
+
+pub const RSFAccelerator = struct {
+    ctx: FutharkContext,
+    weights_s: FutharkArray2DF16,   // [d/2][d/2] — MÓDOSÍTOTT méret
+    weights_t: FutharkArray2DF16,   // [d/2][d/2] — MÓDOSÍTOTT méret
+    s_bias: FutharkArray1DF16,      // [d/2] — ÚJ
+    t_bias: FutharkArray1DF16,      // [d/2] — ÚJ
+    velocity_s: FutharkArray2DF16,
+    velocity_t: FutharkArray2DF16,
+    model_dim: usize,
+    clip_min: f16,                  // ÚJ (default: -5.0)
+    clip_max: f16,                  // ÚJ (default: 5.0)
+    initialized: bool,
+
+    const Self = @This();
+
+    pub fn init(model_dim: usize) AccelError!Self {
+        if (model_dim == 0) return AccelError.InvalidDimensions;
+        const half_dim = model_dim / 2;
+
+        var ctx = try FutharkContext.init();
+        errdefer ctx.deinit();
+
+        var weights_s = try FutharkArray2DF16.newZeros(&ctx, half_dim, half_dim);
+        errdefer weights_s.free(&ctx);
+        var weights_t = try FutharkArray2DF16.newZeros(&ctx, half_dim, half_dim);
+        errdefer weights_t.free(&ctx);
+        var s_bias = try FutharkArray1DF16.newZeros(&ctx, half_dim);
+        errdefer s_bias.free(&ctx);
+        var t_bias = try FutharkArray1DF16.newZeros(&ctx, half_dim);
+        errdefer t_bias.free(&ctx);
+        var velocity_s = try FutharkArray2DF16.newZeros(&ctx, half_dim, half_dim);
+        errdefer velocity_s.free(&ctx);
+        var velocity_t = try FutharkArray2DF16.newZeros(&ctx, half_dim, half_dim);
+        errdefer velocity_t.free(&ctx);
+
+        return Self{
+            .ctx = ctx,
+            .weights_s = weights_s,
+            .weights_t = weights_t,
+            .s_bias = s_bias,
+            .t_bias = t_bias,
+            .velocity_s = velocity_s,
+            .velocity_t = velocity_t,
+            .model_dim = model_dim,
+            .clip_min = @as(f16, -5.0),
+            .clip_max = @as(f16, 5.0),
+            .initialized = true,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        if (!self.initialized) return;
+        self.velocity_t.free(&self.ctx);
+        self.velocity_s.free(&self.ctx);
+        self.t_bias.free(&self.ctx);    // ÚJ
+        self.s_bias.free(&self.ctx);    // ÚJ
+        self.weights_t.free(&self.ctx);
+        self.weights_s.free(&self.ctx);
+        self.ctx.deinit();
+        self.initialized = false;
+    }
+    // ...
+};
+```
+
+### 3b. `forward()` metódus frissítése (395-424. sor) [5](#6-4) 
+
+```zig
+    pub fn forward(self: *Self, input: *FutharkArray2DF16) AccelError!FutharkArray2DF16 {
+        if (!self.initialized) return AccelError.NullPointer;
+        if (self.ctx.ctx == null) return AccelError.NullPointer;
+        if (input.arr == null) return AccelError.NullPointer;
+        if (self.weights_s.arr == null or self.weights_t.arr == null) return AccelError.NullPointer;
+        if (self.s_bias.arr == null or self.t_bias.arr == null) return AccelError.NullPointer;
+
+        var output: ?*futhark.struct_futhark_f16_2d = null;
+        const clip_min_bits: u16 = @bitCast(self.clip_min);
+        const clip_max_bits: u16 = @bitCast(self.clip_max);
+
+        const result = futhark.futhark_entry_rsf_forward(
+            self.ctx.ctx,
+            &output,
+            input.arr,
+            self.weights_s.arr,
+            self.weights_t.arr,
+            self.s_bias.arr,
+            self.t_bias.arr,
+            clip_min_bits,
+            clip_max_bits,
+        );
+
+        if (result != 0) return AccelError.FutharkForwardFailed;
+        if (output == null) return AccelError.NullPointer;
+
+        return FutharkArray2DF16{
+            .arr = output,
+            .rows = input.rows,
+            .cols = input.cols,
+        };
+    }
+```
+
+### 3c. `GPUOps` — softmax/layerNorm/relu/gelu TÖRLÉSE (624-686. sor) [6](#6-5) 
+
+**Töröld a teljes `softmax`, `layerNorm`, `relu`, `gelu` metódusokat** (624-686. sor). A `matmul` (607-622. sor) maradhat — az általános lineáris algebra.
+
+```zig
+// src/hw/accel/accel_interface.zig — GPUOps struct
+pub const GPUOps = struct {
+    ctx: FutharkContext,
+
+    const Self = @This();
+
+    pub fn init() AccelError!Self {
+        return Self{ .ctx = try FutharkContext.init() };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.ctx.deinit();
+    }
+
+    pub fn matmul(self: *Self, a: *const core_tensor.Tensor, b: *const core_tensor.Tensor, allocator: std.mem.Allocator) AccelError!core_tensor.Tensor {
+        // ... (marad változatlanul, 607-622. sor)
+    }
+
+    // TÖRÖLVE: softmax() — volt 624-637
+    // TÖRÖLVE: layerNorm() — volt 639-656
+    // TÖRÖLVE: relu() — volt 658-671
+    // TÖRÖLVE: gelu() — volt 673-686
+};
+```
+
+---
+
+# 4. `src/core_relational/verified_inference_engine.zig` — tanh → affin coupling
+
+### 4a. `performVerifiedInference` (205-298. sor) [7](#6-6) 
+
+**Cseréld le a 212-254. sor közötti részt** (a `tanh` + mean-subtraction blokkot) RSF affin coupling-ra:
+
+```zig
+    pub fn performVerifiedInference(self: *Self, input: []const f32, output_buf: []f32) !void {
+        if (input.len == 0 or output_buf.len == 0) {
+            return error.InvalidInputOutput;
+        }
+
+        const input_commitment = try self.commitInput(input);
+
+        // --- RSF affin coupling forward (tanh + normalizáció HELYETT) ---
+        const half = output_buf.len / 2;
+        if (half == 0) return error.InvalidInputOutput;
+
+        var intermediate = try self.allocator.alloc(f32, output_buf.len);
+        defer self.allocator.free(intermediate);
+
+        // Bemenet másolása
+        var i: usize = 0;
+        while (i < intermediate.len and i < input.len) : (i += 1) {
+            intermediate[i] = input[i];
+        }
+        while (i < intermediate.len) : (i += 1) {
+            intermediate[i] = 0.0;
+        }
+
+        try self.proof_of_correctness.recordStep(
+            1,
+            input,
+            intermediate,
+            obf.ProofOfCorrectness.OperationType.AffineCoupling, // ÚJ enum érték
+        );
+
+        // Affin coupling: split → scale → shift
+        // x1 = intermediate[0..half], x2 = intermediate[half..]
+        // scale = exp(clip(x2 * 1.732))  (egyszerűsített, súlyok nélkül)
+        // y1 = x1 * scale
+        // y2 = x2 + y1 * 0.5 (egyszerűsített translation)
+        const clip_min: f32 = -5.0;
+        const clip_max: f32 = 5.0;
+
+        i = 0;
+        while (i < half) : (i += 1) {
+            const raw = intermediate[i + half] * 1.732;
+            const clipped = if (raw < clip_min) clip_min else if (raw > clip_max) clip_max else raw;
+            const scale = @exp(clipped);
+            intermediate[i] *= scale;
+        }
+
+        i = 0;
+        while (i < half) : (i += 1) {
+            intermediate[i + half] += intermediate[i] * 0.5;
+        }
+
+        i = 0;
+        while (i < output_buf.len) : (i += 1) {
+            output_buf[i] = intermediate[i];
+        }
+
+        try self.proof_of_correctness.recordStep(
+            2,
+            intermediate,
+            output_buf,
+            obf.ProofOfCorrectness.OperationType.AffineCoupling,
+        );
+        // --- RSF affin coupling VÉGE ---
+
+        for (output_buf) |*val| {
+            const noisy = self.differential_privacy.addLaplaceNoise(@as(f64, val.*));
+            val.* = @floatCast(noisy);
+        }
+
+        // ... (a többi marad változatlanul: ZK proof, stb.)
+```
+
+### 4b. `performVerifiedInferenceWithZK` (300-360. sor) [8](#6-7) 
+
+**Cseréld le a 324-351. sor közötti réteg-ciklust** (a `tanh(sum)` blokkot):
+
+```zig
+        var layer: usize = 0;
+        while (layer < weights_s.len) : (layer += 1) {
+            // RSF affin coupling forward (tanh HELYETT)
+            const half = output_buf.len / 2;
+            
+            // Scale: s = exp(clip(W_s * x2 + bias))
+            var scale_buf = try self.allocator.alloc(f32, half);
+            defer self.allocator.free(scale_buf);
+            
+            var out_idx: usize = 0;
+            while (out_idx < half) : (out_idx += 1) {
+                var sum: f32 = 0.0;
+                var in_idx: usize = 0;
+                while (in_idx < half and in_idx + half < intermediate.len and in_idx < weights_s[layer].len) : (in_idx += 1) {
+                    if (out_idx < weights_s[layer][in_idx].len) {
+                        sum += intermediate[in_idx + half] * weights_s[layer][in_idx][out_idx];
+                    }
+                }
+                const clipped
+
+### Citations
+
+**File:** src/hw/accel/main.fut (L1-114)
+```text
+type f16 = f16
+
+entry rsf_spectral_transform [n][d] (input: [n][d]f16) (weights_s: [d][d]f16) : *[n][d]f16 =
+  map (\row ->
+    map (\j ->
+      f16.sum (map2 (\x w -> x f16.* w) row weights_s[j])
+    ) (iota d)
+  ) input
+
+entry rsf_temporal_transform [n][d] (input: [n][d]f16) (weights_t: [d][d]f16) : *[n][d]f16 =
+  map (\row ->
+    map (\j ->
+      f16.sum (map2 (\x w -> x f16.* w) row weights_t[j])
+    ) (iota d)
+  ) input
+
+entry relu [n][d] (input: [n][d]f16) : *[n][d]f16 =
+  map (map (\x -> f16.max x (f16.i32 0))) input
+
+entry layer_norm [n][d] (input: [n][d]f16) : *[n][d]f16 =
+  let epsilon = f16.f32 1e-5
+  in map (\row ->
+    let mean = (f16.sum row) f16./ (f16.i64 d)
+    let variance = (f16.sum (map (\x -> (x f16.- mean) f16.* (x f16.- mean)) row)) f16./ (f16.i64 d)
+    let std_dev = f16.sqrt (variance f16.+ epsilon)
+    in map (\x -> (x f16.- mean) f16./ std_dev) row
+  ) input
+
+entry rsf_forward [n][d] (input: [n][d]f16) (weights_s: [d][d]f16) (weights_t: [d][d]f16) : *[n][d]f16 =
+  let after_spectral = rsf_spectral_transform input weights_s
+  let after_relu1 = relu after_spectral
+  let after_temporal = rsf_temporal_transform after_relu1 weights_t
+  let after_relu2 = relu after_temporal
+  in layer_norm after_relu2
+
+entry rsf_grad_spectral [n][d] (input: [n][d]f16) (grad_output: [n][d]f16) : *[d][d]f16 =
+  let grad_weights = replicate d (replicate d (f16.i32 0))
+  in loop grad_weights for i < n do
+       loop grad_weights for j < d do
+         loop grad_weights for k < d do
+           let update = input[i,k] f16.* grad_output[i,j]
+           let grad_weights[j,k] = grad_weights[j,k] f16.+ update
+           in grad_weights
+
+entry rsf_grad_temporal [n][d] (input: [n][d]f16) (grad_output: [n][d]f16) : *[d][d]f16 =
+  let grad_weights = replicate d (replicate d (f16.i32 0))
+  in loop grad_weights for i < n do
+       loop grad_weights for j < d do
+         loop grad_weights for k < d do
+           let update = input[i,k] f16.* grad_output[i,j]
+           let grad_weights[j,k] = grad_weights[j,k] f16.+ update
+           in grad_weights
+
+entry sfd_update [d] (weights: *[d][d]f16) (gradients: [d][d]f16) (learning_rate: f16) (momentum: f16) (velocity: *[d][d]f16) : (*[d][d]f16, *[d][d]f16) =
+  let new_velocity = map2 (map2 (\v g -> momentum f16.* v f16.+ learning_rate f16.* g)) velocity gradients
+  let new_weights = map2 (map2 (\w v -> w f16.- v)) weights new_velocity
+  in (new_weights, new_velocity)
+
+entry compute_loss [n][d] (output: [n][d]f16) (target: [n][d]f16) : f16 =
+  let squared_diff = map2 (map2 (\o t -> (o f16.- t) f16.* (o f16.- t))) output target
+  let total = f16.sum (flatten squared_diff)
+  let count = f16.i64 (n * d)
+  in total f16./ count
+
+entry accumulate_gradients [d] (grad1: *[d][d]f16) (grad2: [d][d]f16) : *[d][d]f16 =
+  map2 (map2 (f16.+)) grad1 grad2
+
+entry batch_forward [batch_size][seq_len][d] (inputs: [batch_size][seq_len][d]f16) (weights_s: [d][d]f16) (weights_t: [d][d]f16) : *[batch_size][seq_len][d]f16 =
+  map (\sample -> rsf_forward sample weights_s weights_t) inputs
+
+entry batch_gradients [batch_size][seq_len][d] (inputs: [batch_size][seq_len][d]f16) (grad_outputs: [batch_size][seq_len][d]f16) : (*[d][d]f16, *[d][d]f16) =
+  let grad_s_list = map2 rsf_grad_spectral inputs grad_outputs
+  let grad_t_list = map2 rsf_grad_temporal inputs grad_outputs
+  let grad_s_total = reduce (map2 (map2 (f16.+))) (replicate d (replicate d (f16.i32 0))) grad_s_list
+  let grad_t_total = reduce (map2 (map2 (f16.+))) (replicate d (replicate d (f16.i32 0))) grad_t_list
+  in (grad_s_total, grad_t_total)
+
+entry xavier_fill_inplace [d] (weights: *[d][d]f16) (seed: i32) : *[d][d]f16 =
+  let scale = f16.sqrt (f16.f32 2.0 f16./ f16.i64 d)
+  in map (\i ->
+    map (\j ->
+      let hash = (seed + i32.i64 i * 73856093 + i32.i64 j * 19349663) % 1000000
+      let normalized = (f16.i32 hash) f16./ (f16.i32 1000000) f16.- f16.f32 0.5
+      in normalized f16.* scale
+    ) (iota d)
+  ) (iota d)
+
+entry batch_compute_loss [batch_size][seq_len][d] (outputs: [batch_size][seq_len][d]f16) (targets: [batch_size][seq_len][d]f16) : f16 =
+  let squared_diff = map2 (map2 (map2 (\o t -> (o f16.- t) f16.* (o f16.- t)))) outputs targets
+  let total = f16.sum (flatten (flatten squared_diff))
+  let count = f16.i64 (batch_size * seq_len * d)
+  in total f16./ count
+
+entry scale_weights_inplace [d] (weights: *[d][d]f16) (scale_factor: f16) : *[d][d]f16 =
+  map (map (\w -> w f16./ scale_factor)) weights
+
+entry training_step [batch_size][seq_len][d] 
+  (inputs: [batch_size][seq_len][d]f16)
+  (targets: [batch_size][seq_len][d]f16)
+  (weights_s: *[d][d]f16)
+  (weights_t: *[d][d]f16)
+  (velocity_s: *[d][d]f16)
+  (velocity_t: *[d][d]f16)
+  (learning_rate: f16)
+  (momentum: f16) : (*[d][d]f16, *[d][d]f16, *[d][d]f16, *[d][d]f16, f16) =
+
+  let outputs = batch_forward inputs weights_s weights_t
+  let loss = batch_compute_loss outputs targets
+  let grad_outputs = map2 (map2 (map2 (\o t -> (f16.f32 2.0) f16.* (o f16.- t)))) outputs targets
+  let (grad_s, grad_t) = batch_gradients inputs grad_outputs
+  let (new_weights_s, new_velocity_s) = sfd_update weights_s grad_s learning_rate momentum velocity_s
+  let (new_weights_t, new_velocity_t) = sfd_update weights_t grad_t learning_rate momentum velocity_t
+
+  in (new_weights_s, new_weights_t, new_velocity_s, new_velocity_t, loss)
+```
+
+**File:** src/hw/accel/futhark_bindings.zig (L62-91)
+```text
+pub extern "c" fn futhark_entry_matmul(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_2d, a: ?*struct_futhark_f32_2d, b: ?*struct_futhark_f32_2d) c_int;
+pub extern "c" fn futhark_entry_batch_matmul(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_3d, a: ?*struct_futhark_f32_3d, b: ?*struct_futhark_f32_3d) c_int;
+pub extern "c" fn futhark_entry_dot(ctx: ?*struct_futhark_context, out: ?*f32, a: ?*struct_futhark_f32_1d, b: ?*struct_futhark_f32_1d) c_int;
+pub extern "c" fn futhark_entry_apply_softmax(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, x: ?*struct_futhark_f32_1d) c_int;
+pub extern "c" fn futhark_entry_apply_layer_norm(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, x: ?*struct_futhark_f32_1d, gamma: ?*struct_futhark_f32_1d, beta: ?*struct_futhark_f32_1d, eps: f32) c_int;
+pub extern "c" fn futhark_entry_apply_relu(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, x: ?*struct_futhark_f32_1d) c_int;
+pub extern "c" fn futhark_entry_apply_gelu(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, x: ?*struct_futhark_f32_1d) c_int;
+pub extern "c" fn futhark_entry_clip_fisher(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, fisher: ?*struct_futhark_f32_1d, clip_val: f32) c_int;
+pub extern "c" fn futhark_entry_reduce_gradients(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, gradients: ?*struct_futhark_f32_2d) c_int;
+pub extern "c" fn futhark_entry_rank_segments(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, query_hash: u64, segment_hashes: ?*struct_futhark_u64_1d, base_scores: ?*struct_futhark_f32_1d) c_int;
+
+pub extern "c" fn futhark_entry_rsf_forward(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f16_2d, input: ?*struct_futhark_f16_2d, weights_s: ?*struct_futhark_f16_2d, weights_t: ?*struct_futhark_f16_2d) c_int;
+pub extern "c" fn futhark_entry_rsf_backward(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f16_2d, grad_output: ?*struct_futhark_f16_2d, weights: ?*struct_futhark_f16_2d) c_int;
+pub extern "c" fn futhark_entry_scale_weights_inplace(ctx: ?*struct_futhark_context, weights: ?*struct_futhark_f16_2d, scale: f32) c_int;
+pub extern "c" fn futhark_entry_training_step(
+    ctx: ?*struct_futhark_context,
+    new_weights_s: ?*?*struct_futhark_f16_2d,
+    new_weights_t: ?*?*struct_futhark_f16_2d,
+    new_velocity_s: ?*?*struct_futhark_f16_2d,
+    new_velocity_t: ?*?*struct_futhark_f16_2d,
+    loss: ?*u16,
+    inputs: ?*struct_futhark_f16_2d,
+    targets: ?*struct_futhark_f16_2d,
+    weights_s: ?*struct_futhark_f16_2d,
+    weights_t: ?*struct_futhark_f16_2d,
+    velocity_s: ?*struct_futhark_f16_2d,
+    velocity_t: ?*struct_futhark_f16_2d,
+    learning_rate: u16,
+    momentum: u16,
+) c_int;
+```
+
+**File:** src/hw/accel/accel_interface.zig (L344-382)
+```text
+pub const RSFAccelerator = struct {
+    ctx: FutharkContext,
+    weights_s: FutharkArray2DF16,
+    weights_t: FutharkArray2DF16,
+    velocity_s: FutharkArray2DF16,
+    velocity_t: FutharkArray2DF16,
+    model_dim: usize,
+    initialized: bool,
+
+    const Self = @This();
+
+    pub fn init(model_dim: usize) AccelError!Self {
+        if (model_dim == 0) return AccelError.InvalidDimensions;
+
+        var ctx = try FutharkContext.init();
+        errdefer ctx.deinit();
+
+        var weights_s = try FutharkArray2DF16.newZeros(&ctx, model_dim, model_dim);
+        errdefer weights_s.free(&ctx);
+
+        var weights_t = try FutharkArray2DF16.newZeros(&ctx, model_dim, model_dim);
+        errdefer weights_t.free(&ctx);
+
+        var velocity_s = try FutharkArray2DF16.newZeros(&ctx, model_dim, model_dim);
+        errdefer velocity_s.free(&ctx);
+
+        var velocity_t = try FutharkArray2DF16.newZeros(&ctx, model_dim, model_dim);
+        errdefer velocity_t.free(&ctx);
+
+        return Self{
+            .ctx = ctx,
+            .weights_s = weights_s,
+            .weights_t = weights_t,
+            .velocity_s = velocity_s,
+            .velocity_t = velocity_t,
+            .model_dim = model_dim,
+            .initialized = true,
+        };
+    }
+```
+
+**File:** src/hw/accel/accel_interface.zig (L395-424)
+```text
+    pub fn forward(self: *Self, input: *FutharkArray2DF16) AccelError!FutharkArray2DF16 {
+        if (!self.initialized) return AccelError.NullPointer;
+        if (self.ctx.ctx == null) return AccelError.NullPointer;
+        if (input.arr == null) return AccelError.NullPointer;
+        if (self.weights_s.arr == null) return AccelError.NullPointer;
+        if (self.weights_t.arr == null) return AccelError.NullPointer;
+
+        var output: ?*futhark.struct_futhark_f16_2d = null;
+        const result = futhark.futhark_entry_rsf_forward(
+            self.ctx.ctx,
+            &output,
+            input.arr,
+            self.weights_s.arr,
+            self.weights_t.arr,
+        );
+
+        if (result != 0) {
+            return AccelError.FutharkForwardFailed;
+        }
+
+        if (output == null) {
+            return AccelError.NullPointer;
+        }
+
+        return FutharkArray2DF16{
+            .arr = output,
+            .rows = input.rows,
+            .cols = input.cols,
+        };
+    }
+```
+
+**File:** src/hw/accel/accel_interface.zig (L624-686)
+```text
+    pub fn softmax(self: *Self, input: *const core_tensor.Tensor, allocator: std.mem.Allocator) AccelError!core_tensor.Tensor {
+        var fi = try FutharkArray1DF32.fromTensor(&self.ctx, input);
+        defer fi.free(&self.ctx);
+
+        var out_arr: ?*futhark.struct_futhark_f32_1d = null;
+        if (futhark.futhark_entry_apply_softmax(self.ctx.ctx, &out_arr, fi.arr) != 0) {
+            return AccelError.FutharkForwardFailed;
+        }
+        if (out_arr == null) return AccelError.NullPointer;
+
+        var result = FutharkArray1DF32{ .arr = out_arr, .len = input.shape.dims[0] };
+        defer result.free(&self.ctx);
+        return result.toTensor(&self.ctx, allocator);
+    }
+
+    pub fn layerNorm(self: *Self, input: *const core_tensor.Tensor, gamma: *const core_tensor.Tensor, beta: *const core_tensor.Tensor, eps: f32, allocator: std.mem.Allocator) AccelError!core_tensor.Tensor {
+        var fi = try FutharkArray1DF32.fromTensor(&self.ctx, input);
+        defer fi.free(&self.ctx);
+        var fg = try FutharkArray1DF32.fromTensor(&self.ctx, gamma);
+        defer fg.free(&self.ctx);
+        var fb = try FutharkArray1DF32.fromTensor(&self.ctx, beta);
+        defer fb.free(&self.ctx);
+
+        var out_arr: ?*futhark.struct_futhark_f32_1d = null;
+        if (futhark.futhark_entry_apply_layer_norm(self.ctx.ctx, &out_arr, fi.arr, fg.arr, fb.arr, eps) != 0) {
+            return AccelError.FutharkForwardFailed;
+        }
+        if (out_arr == null) return AccelError.NullPointer;
+
+        var result = FutharkArray1DF32{ .arr = out_arr, .len = input.shape.dims[0] };
+        defer result.free(&self.ctx);
+        return result.toTensor(&self.ctx, allocator);
+    }
+
+    pub fn relu(self: *Self, input: *const core_tensor.Tensor, allocator: std.mem.Allocator) AccelError!core_tensor.Tensor {
+        var fi = try FutharkArray1DF32.fromTensor(&self.ctx, input);
+        defer fi.free(&self.ctx);
+
+        var out_arr: ?*futhark.struct_futhark_f32_1d = null;
+        if (futhark.futhark_entry_apply_relu(self.ctx.ctx, &out_arr, fi.arr) != 0) {
+            return AccelError.FutharkForwardFailed;
+        }
+        if (out_arr == null) return AccelError.NullPointer;
+
+        var result = FutharkArray1DF32{ .arr = out_arr, .len = input.shape.dims[0] };
+        defer result.free(&self.ctx);
+        return result.toTensor(&self.ctx, allocator);
+    }
+
+    pub fn gelu(self: *Self, input: *const core_tensor.Tensor, allocator: std.mem.Allocator) AccelError!core_tensor.Tensor {
+        var fi = try FutharkArray1DF32.fromTensor(&self.ctx, input);
+        defer fi.free(&self.ctx);
+
+        var out_arr: ?*futhark.struct_futhark_f32_1d = null;
+        if (futhark.futhark_entry_apply_gelu(self.ctx.ctx, &out_arr, fi.arr) != 0) {
+            return AccelError.FutharkForwardFailed;
+        }
+        if (out_arr == null) return AccelError.NullPointer;
+
+        var result = FutharkArray1DF32{ .arr = out_arr, .len = input.shape.dims[0] };
+        defer result.free(&self.ctx);
+        return result.toTensor(&self.ctx, allocator);
+    }
+```
+
+**File:** src/core_relational/verified_inference_engine.zig (L205-298)
+```text
+    pub fn performVerifiedInference(self: *Self, input: []const f32, output_buf: []f32) !void {
+        if (input.len == 0 or output_buf.len == 0) {
+            return error.InvalidInputOutput;
+        }
+
+        const input_commitment = try self.commitInput(input);
+
+        var intermediate_1 = try self.allocator.alloc(f32, output_buf.len);
+        defer self.allocator.free(intermediate_1);
+
+        var i: usize = 0;
+        while (i < intermediate_1.len and i < input.len) : (i += 1) {
+            intermediate_1[i] = input[i] * 1.732;
+        }
+        while (i < intermediate_1.len) : (i += 1) {
+            intermediate_1[i] = 0.0;
+        }
+
+        try self.proof_of_correctness.recordStep(
+            1,
+            input,
+            intermediate_1,
+            obf.ProofOfCorrectness.OperationType.MatrixMultiply,
+        );
+
+        var intermediate_2 = try self.allocator.alloc(f32, output_buf.len);
+        defer self.allocator.free(intermediate_2);
+
+        i = 0;
+        while (i < intermediate_2.len) : (i += 1) {
+            intermediate_2[i] = std.math.tanh(intermediate_1[i]);
+        }
+
+        try self.proof_of_correctness.recordStep(
+            2,
+            intermediate_1,
+            intermediate_2,
+            obf.ProofOfCorrectness.OperationType.Activation,
+        );
+
+        var sum: f64 = 0.0;
+        for (intermediate_2) |val| {
+            sum += @as(f64, val);
+        }
+        const mean: f32 = @floatCast(sum / @as(f64, @floatFromInt(intermediate_2.len)));
+
+        i = 0;
+        while (i < output_buf.len) : (i += 1) {
+            output_buf[i] = intermediate_2[i] - mean;
+        }
+
+        try self.proof_of_correctness.recordStep(
+            3,
+            intermediate_2,
+            output_buf,
+            obf.ProofOfCorrectness.OperationType.Normalization,
+        );
+
+        for (output_buf) |*val| {
+            const noisy = self.differential_privacy.addLaplaceNoise(@as(f64, val.*));
+            val.* = @floatCast(noisy);
+        }
+
+        const output_commitment = try self.commitOutput(output_buf);
+
+        if (self.use_zk_proofs and self.zk_prover != null and self.layer_weights_s != null and self.layer_weights_t != null) {
+            const inference_proof = try zk.ZKInferenceProof.initWithProver(self.allocator);
+
+            const weights_s_slice = self.layer_weights_s.?[0..self.num_layers];
+            const weights_t_slice = self.layer_weights_t.?[0..self.num_layers];
+
+            inference_proof.proveInferenceWithZK(input, output_buf, weights_s_slice, weights_t_slice) catch |err| {
+                std.debug.print("ZK proof generation failed: {}, falling back to hash-based proof\n", .{err});
+                try inference_proof.proveInference(input, output_buf, self.model_hash);
+            };
+
+            try self.inference_proofs.append(inference_proof);
+        } else {
+            const inference_proof = try zk.ZKInferenceProof.init(self.allocator);
+            try inference_proof.proveInference(input, output_buf, self.model_hash);
+            try self.inference_proofs.append(inference_proof);
+        }
+
+        _ = input_commitment;
+        _ = output_commitment;
+
+        self.verification_count += 1;
+
+        try self.proof_of_correctness.finalize();
+
+        if (try self.verifyProofOfCorrectness()) {
+            self.successful_verifications += 1;
+        }
+    }
+```
+
+**File:** src/core_relational/verified_inference_engine.zig (L300-360)
+```text
+    pub fn performVerifiedInferenceWithZK(
+        self: *Self,
+        input: []const f32,
+        output_buf: []f32,
+        weights_s: []const []const []const f32,
+        weights_t: []const []const []const f32,
+    ) !*zk.ZKProofBundle {
+        if (input.len == 0 or output_buf.len == 0) {
+            return error.InvalidInputOutput;
+        }
+
+        if (self.zk_prover == null) {
+            self.zk_prover = try zk.ZKInferenceProver.init(self.allocator);
+        }
+
+        var intermediate = try self.allocator.alloc(f32, output_buf.len);
+        defer self.allocator.free(intermediate);
+
+        var i: usize = 0;
+        while (i < output_buf.len and i < input.len) : (i += 1) {
+            intermediate[i] = input[i];
+        }
+
+        var layer: usize = 0;
+        while (layer < weights_s.len) : (layer += 1) {
+            var next_intermediate = try self.allocator.alloc(f32, output_buf.len);
+
+            var out_idx: usize = 0;
+            while (out_idx < output_buf.len) : (out_idx += 1) {
+                var sum: f32 = 0.0;
+                var in_idx: usize = 0;
+                while (in_idx < intermediate.len and in_idx < weights_s[layer].len) : (in_idx += 1) {
+                    if (out_idx < weights_s[layer][in_idx].len) {
+                        sum += intermediate[in_idx] * weights_s[layer][in_idx][out_idx];
+                    }
+                }
+                next_intermediate[out_idx] = std.math.tanh(sum);
+            }
+
+            out_idx = 0;
+            while (out_idx < output_buf.len) : (out_idx += 1) {
+                var sum: f32 = 0.0;
+                var in_idx: usize = 0;
+                while (in_idx < next_intermediate.len and in_idx < weights_t[layer].len) : (in_idx += 1) {
+                    if (out_idx < weights_t[layer][in_idx].len) {
+                        sum += next_intermediate[in_idx] * weights_t[layer][in_idx][out_idx];
+                    }
+                }
+                intermediate[out_idx] = intermediate[out_idx] + sum;
+            }
+
+            self.allocator.free(next_intermediate);
+        }
+
+        i = 0;
+        while (i < output_buf.len) : (i += 1) {
+            output_buf[i] = intermediate[i];
+        }
+
+        const proof_bundle = try self.zk_prover.?.proveInference(input, output_buf, weights_s, weights_t);
+
+```

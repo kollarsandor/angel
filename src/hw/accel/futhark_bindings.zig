@@ -62,10 +62,6 @@ pub extern "c" fn futhark_values_i64_1d(ctx: ?*struct_futhark_context, arr: ?*st
 pub extern "c" fn futhark_entry_matmul(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_2d, a: ?*struct_futhark_f32_2d, b: ?*struct_futhark_f32_2d) c_int;
 pub extern "c" fn futhark_entry_batch_matmul(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_3d, a: ?*struct_futhark_f32_3d, b: ?*struct_futhark_f32_3d) c_int;
 pub extern "c" fn futhark_entry_dot(ctx: ?*struct_futhark_context, out: ?*f32, a: ?*struct_futhark_f32_1d, b: ?*struct_futhark_f32_1d) c_int;
-pub extern "c" fn futhark_entry_apply_softmax(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, x: ?*struct_futhark_f32_1d) c_int;
-pub extern "c" fn futhark_entry_apply_layer_norm(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, x: ?*struct_futhark_f32_1d, gamma: ?*struct_futhark_f32_1d, beta: ?*struct_futhark_f32_1d, eps: f32) c_int;
-pub extern "c" fn futhark_entry_apply_relu(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, x: ?*struct_futhark_f32_1d) c_int;
-pub extern "c" fn futhark_entry_apply_gelu(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, x: ?*struct_futhark_f32_1d) c_int;
 pub extern "c" fn futhark_entry_clip_fisher(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, fisher: ?*struct_futhark_f32_1d, clip_val: f32) c_int;
 pub extern "c" fn futhark_entry_reduce_gradients(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, gradients: ?*struct_futhark_f32_2d) c_int;
 pub extern "c" fn futhark_entry_rank_segments(ctx: ?*struct_futhark_context, out: ?*?*struct_futhark_f32_1d, query_hash: u64, segment_hashes: ?*struct_futhark_u64_1d, base_scores: ?*struct_futhark_f32_1d) c_int;

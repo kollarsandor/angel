@@ -446,9 +446,6 @@ def Tensor.sqrtOp (t : Tensor) : Tensor :=
 def Tensor.powOp (t : Tensor) (exponent : Float) : Tensor :=
   mapData t (fun v => Float.pow v exponent)
 def Tensor.absOp (t : Tensor) : Tensor := mapData t Float.abs
-def Tensor.reluOp (t : Tensor) : Tensor :=
-  mapData t (fun v => if v > 0.0 then v else 0.0)
-
 theorem Tensor.expOp_shape (t : Tensor) : t.expOp.shape = t.shape :=
   mapData_preserves_shape t Float.exp
 theorem Tensor.logOp_shape (t : Tensor) : t.logOp.shape = t.shape :=
@@ -463,8 +460,6 @@ theorem Tensor.sqrtOp_shape (t : Tensor) : t.sqrtOp.shape = t.shape :=
   mapData_preserves_shape t _
 theorem Tensor.absOp_shape (t : Tensor) : t.absOp.shape = t.shape :=
   mapData_preserves_shape t Float.abs
-theorem Tensor.reluOp_shape (t : Tensor) : t.reluOp.shape = t.shape :=
-  mapData_preserves_shape t _
 
 theorem Tensor.exp_preserves_size (t : Tensor) :
     t.expOp.data.size = t.data.size := mapData_preserves_size t Float.exp
@@ -835,114 +830,6 @@ def Tensor.stackOp (tensors : List Tensor) (axis : Nat) : TResult Tensor :=
 
 theorem Tensor.stackOp_requires_nonempty :
     ∃ e, Tensor.stackOp [] 0 = Except.error e := ⟨_, rfl⟩
-
-def Tensor.conv2d (input kernel : Tensor) (stride padding : Nat × Nat) : TResult Tensor :=
-  if input.shape.dims.length ≠ 4 ∨ kernel.shape.dims.length ≠ 4 then
-    Except.error TensorError.invalidConv2D
-  else
-    let in_c := input.shape.dims.get! 3
-    let ker_in_c := kernel.shape.dims.get! 2
-    if in_c ≠ ker_in_c then Except.error TensorError.invalidConv2D
-    else if stride.1 = 0 ∨ stride.2 = 0 then Except.error TensorError.invalidConv2D
-    else
-      let batch := input.shape.dims.get! 0
-      let in_h := input.shape.dims.get! 1
-      let in_w := input.shape.dims.get! 2
-      let k_h := kernel.shape.dims.get! 0
-      let k_w := kernel.shape.dims.get! 1
-      let out_c := kernel.shape.dims.get! 3
-      let out_h := (in_h + 2 * padding.1 - k_h) / stride.1 + 1
-      let out_w := (in_w + 2 * padding.2 - k_w) / stride.2 + 1
-      if out_h = 0 ∨ out_w = 0 ∨ batch = 0 ∨ out_c = 0 then
-        Except.error TensorError.invalidConv2D
-      else
-        let outTotal := batch * out_h * out_w * out_c
-        let inShape := Shape.mk' input.shape.dims
-        let kerShape := Shape.mk' kernel.shape.dims
-        let data := Array.ofFn (fun idx : Fin outTotal =>
-          let rem0 := idx.val
-          let b := rem0 / (out_h * out_w * out_c)
-          let rem1 := rem0 % (out_h * out_w * out_c)
-          let oh := rem1 / (out_w * out_c)
-          let rem2 := rem1 % (out_w * out_c)
-          let ow := rem2 / out_c
-          let oc := rem2 % out_c
-          (List.range k_h).foldl (fun acc kh =>
-            (List.range k_w).foldl (fun acc2 kw =>
-              (List.range in_c).foldl (fun acc3 ic =>
-                let ih := oh * stride.1 + kh
-                let iw := ow * stride.2 + kw
-                if ih < padding.1 ∨ iw < padding.2 then acc3
-                else
-                  let realH := ih - padding.1
-                  let realW := iw - padding.2
-                  if realH ≥ in_h ∨ realW ≥ in_w then acc3
-                  else
-                    let inVal := input.data.get! (computeFlatIndex inShape [b, realH, realW, ic])
-                    let kerVal := kernel.data.get! (computeFlatIndex kerShape [kh, kw, ic, oc])
-                    acc3 + inVal * kerVal
-              ) acc2
-            ) acc
-          ) 0.0)
-        Except.ok {
-          data := data
-          shape := Shape.mk' [batch, out_h, out_w, out_c]
-          h_data_size := by simp [Array.size_ofFn]
-          refcount := RefCount.init
-          cow := CowState.init
-        }
-
-theorem Tensor.conv2d_requires_4d (input kernel : Tensor)
-    (stride padding : Nat × Nat) (h : input.shape.dims.length ≠ 4) :
-    ∃ e, Tensor.conv2d input kernel stride padding = Except.error e := by
-  unfold Tensor.conv2d; simp [h]
-
-def Tensor.softmaxOp (t : Tensor) (axis : Nat) : TResult Tensor :=
-  if axis ≥ t.shape.dims.length then
-    Except.error TensorError.invalidAxis
-  else
-    let totalSize := t.shape.totalSize
-    let axisSize := t.shape.dims.get! axis
-    let srcShape := Shape.mk' t.shape.dims
-    let resultData := Array.ofFn (fun idx : Fin totalSize =>
-      let multiIdx := flatToMultiIndex t.shape.dims idx.val
-      let baseMulti := multiIdx.enum.map (fun ⟨i, v⟩ =>
-        if i = axis then 0 else v)
-      let maxVal := (List.range axisSize).foldl (fun acc k =>
-        let mi := baseMulti.enum.map (fun ⟨i, v⟩ =>
-          if i = axis then k else v)
-        max acc (t.data.get! (computeFlatIndex srcShape mi))
-      ) floatNegInf
-      let expVal := Float.exp (t.data.get! (computeFlatIndex srcShape multiIdx) - maxVal)
-      let sumExp := (List.range axisSize).foldl (fun acc k =>
-        let mi := baseMulti.enum.map (fun ⟨i, v⟩ =>
-          if i = axis then k else v)
-        acc + Float.exp (t.data.get! (computeFlatIndex srcShape mi) - maxVal)
-      ) 0.0
-      let safeDivisor := if sumExp < 1e-10 then 1e-10 else sumExp
-      expVal / safeDivisor)
-    Except.ok {
-      data := resultData
-      shape := t.shape
-      h_data_size := by
-        show resultData.size = t.shape.totalSize
-        simp [resultData, Array.size_ofFn]
-      refcount := RefCount.init
-      cow := CowState.init
-    }
-
-theorem Tensor.softmaxOp_shape (t : Tensor) (axis : Nat) (t' : Tensor)
-    (h_ok : t.softmaxOp axis = Except.ok t') :
-    t'.shape = t.shape := by
-  unfold Tensor.softmaxOp at h_ok
-  split at h_ok
-  · cases h_ok
-  · injection h_ok with h'; rw [← h']
-
-theorem Tensor.softmaxOp_requires_valid_axis (t : Tensor) (axis : Nat)
-    (h : axis ≥ t.shape.dims.length) :
-    ∃ e, t.softmaxOp axis = Except.error e := by
-  unfold Tensor.softmaxOp; simp [h]
 
 def Tensor.matmul (a b : Tensor) : TResult Tensor :=
   if a.shape.dims.length ≠ 2 ∨ b.shape.dims.length ≠ 2 then
@@ -2012,14 +1899,10 @@ def Tensor.unsqueezeVerified (t : Tensor) (axis : Nat) : TResult Tensor := Tenso
 def Tensor.broadcastVerified (t : Tensor) (targetDims : List Nat) : TResult Tensor := Tensor.broadcastOp t targetDims
 def Tensor.padVerified (t : Tensor) (pads : List (Nat × Nat)) : TResult Tensor := Tensor.padOp t pads
 def Tensor.tileVerified (t : Tensor) (reps : List Nat) : TResult Tensor := Tensor.tileOp t reps
-def Tensor.softmaxVerified (t : Tensor) (axis : Nat) : TResult Tensor := Tensor.softmaxOp t axis
 def Tensor.randomUniformVerified (dims : List Nat) (minVal maxVal : Float) (seed : Nat) : TResult Tensor :=
   Tensor.randomUniform dims minVal maxVal seed
 def Tensor.randomNormalVerified (dims : List Nat) (meanVal stddevVal : Float) (seed : Nat) : TResult Tensor :=
   Tensor.randomNormal dims meanVal stddevVal seed
-def Tensor.conv2dVerified (input kernel : Tensor) (stride padding : Nat × Nat) : TResult Tensor :=
-  Tensor.conv2d input kernel stride padding
-def Tensor.reluVerified (t : Tensor) : Tensor := Tensor.reluOp t
 def Tensor.identityVerified (n : Nat) : TResult Tensor := Tensor.identity n
 def Tensor.clipVerified (t : Tensor) (minVal maxVal : Float) : Tensor := Tensor.clipOp t minVal maxVal
 def Tensor.inverseVerified (t : Tensor) : TResult Tensor := Tensor.inverse t
@@ -2461,20 +2344,6 @@ theorem ZigTensorModel.abs_let_spec (zt : ZigTensorModel) :
     (let result := ZigTensorModel.abs zt; result) = ZigTensorModel.ofTensor (Tensor.absVerified zt.toTensor) := by
   rfl
 
-def ZigTensorModel.relu (zt : ZigTensorModel) : ZigTensorModel :=
-  ZigTensorModel.ofTensor (Tensor.reluVerified zt.toTensor)
-
-@[simp] theorem ZigTensorModel.relu_spec (zt : ZigTensorModel) :
-    ZigTensorModel.relu zt = ZigTensorModel.ofTensor (Tensor.reluVerified zt.toTensor) := rfl
-
-theorem ZigTensorModel.relu_spec_symm (zt : ZigTensorModel) :
-    ZigTensorModel.ofTensor (Tensor.reluVerified zt.toTensor) = ZigTensorModel.relu zt := by
-  rfl
-
-theorem ZigTensorModel.relu_let_spec (zt : ZigTensorModel) :
-    (let result := ZigTensorModel.relu zt; result) = ZigTensorModel.ofTensor (Tensor.reluVerified zt.toTensor) := by
-  rfl
-
 def ZigTensorModel.toInt (zt : ZigTensorModel) : ZigTensorModel :=
   ZigTensorModel.ofTensor (Tensor.toInt zt.toTensor)
 
@@ -2669,20 +2538,6 @@ theorem ZigTensorModel.unsqueeze_spec_symm (zt : ZigTensorModel) (axis : Nat) :
 
 theorem ZigTensorModel.unsqueeze_let_spec (zt : ZigTensorModel) (axis : Nat) :
     (let result := ZigTensorModel.unsqueeze zt axis; result) = ZigTensorModel.fromTensorResult (Tensor.unsqueezeVerified zt.toTensor axis) := by
-  rfl
-
-def ZigTensorModel.softmax (zt : ZigTensorModel) (axis : Nat) : TResult ZigTensorModel :=
-  ZigTensorModel.fromTensorResult (Tensor.softmaxVerified zt.toTensor axis)
-
-@[simp] theorem ZigTensorModel.softmax_spec (zt : ZigTensorModel) (axis : Nat) :
-    ZigTensorModel.softmax zt axis = ZigTensorModel.fromTensorResult (Tensor.softmaxVerified zt.toTensor axis) := rfl
-
-theorem ZigTensorModel.softmax_spec_symm (zt : ZigTensorModel) (axis : Nat) :
-    ZigTensorModel.fromTensorResult (Tensor.softmaxVerified zt.toTensor axis) = ZigTensorModel.softmax zt axis := by
-  rfl
-
-theorem ZigTensorModel.softmax_let_spec (zt : ZigTensorModel) (axis : Nat) :
-    (let result := ZigTensorModel.softmax zt axis; result) = ZigTensorModel.fromTensorResult (Tensor.softmaxVerified zt.toTensor axis) := by
   rfl
 
 def ZigTensorModel.pad (zt : ZigTensorModel) (pads : List (Nat × Nat)) : TResult ZigTensorModel :=
@@ -2963,20 +2818,6 @@ theorem ZigTensorModel.solve_spec_symm (a : ZigTensorModel) (b : ZigTensorModel)
 
 theorem ZigTensorModel.solve_let_spec (a : ZigTensorModel) (b : ZigTensorModel) :
     (let result := ZigTensorModel.solve a b; result) = ZigTensorModel.fromTensorResult (Tensor.solveVerified a.toTensor b.toTensor) := by
-  rfl
-
-def ZigTensorModel.conv2d (input : ZigTensorModel) (kernel : ZigTensorModel) (stride : Nat × Nat) (padding : Nat × Nat) : TResult ZigTensorModel :=
-  ZigTensorModel.fromTensorResult (Tensor.conv2dVerified input.toTensor kernel.toTensor stride padding)
-
-@[simp] theorem ZigTensorModel.conv2d_spec (input : ZigTensorModel) (kernel : ZigTensorModel) (stride : Nat × Nat) (padding : Nat × Nat) :
-    ZigTensorModel.conv2d input kernel stride padding = ZigTensorModel.fromTensorResult (Tensor.conv2dVerified input.toTensor kernel.toTensor stride padding) := rfl
-
-theorem ZigTensorModel.conv2d_spec_symm (input : ZigTensorModel) (kernel : ZigTensorModel) (stride : Nat × Nat) (padding : Nat × Nat) :
-    ZigTensorModel.fromTensorResult (Tensor.conv2dVerified input.toTensor kernel.toTensor stride padding) = ZigTensorModel.conv2d input kernel stride padding := by
-  rfl
-
-theorem ZigTensorModel.conv2d_let_spec (input : ZigTensorModel) (kernel : ZigTensorModel) (stride : Nat × Nat) (padding : Nat × Nat) :
-    (let result := ZigTensorModel.conv2d input kernel stride padding; result) = ZigTensorModel.fromTensorResult (Tensor.conv2dVerified input.toTensor kernel.toTensor stride padding) := by
   rfl
 
 def ZigTensorModel.concat (tensors : List ZigTensorModel) (axis : Nat) : TResult ZigTensorModel :=
@@ -3267,15 +3108,12 @@ def zigApiBindings : List (String × String) :=
   ("Tensor.matmul", "Tensor.matmul"),
   ("Tensor.broadcast", "Tensor.broadcastVerified"),
   ("Tensor.unsqueeze", "Tensor.unsqueezeVerified"),
-  ("Tensor.relu", "Tensor.reluVerified"),
-  ("Tensor.softmax", "Tensor.softmaxVerified"),
   ("Tensor.zeros", "Tensor.zeros"),
   ("Tensor.ones", "Tensor.ones"),
   ("Tensor.full", "Tensor.full"),
   ("Tensor.randomUniform", "Tensor.randomUniformVerified"),
   ("Tensor.randomNormal", "Tensor.randomNormalVerified"),
   ("Tensor.identity", "Tensor.identityVerified"),
-  ("Tensor.conv2d", "Tensor.conv2dVerified"),
   ("Tensor.pad", "Tensor.padVerified"),
   ("Tensor.tile", "Tensor.tileVerified"),
   ("Tensor.concat", "Tensor.concatVerified"),
@@ -3313,7 +3151,7 @@ def zigApiBindings : List (String × String) :=
 ]
 
 @[simp] theorem zigApiBindings_length :
-    zigApiBindings.length = 90 := rfl
+    zigApiBindings.length = 87 := rfl
 
 @[simp] theorem zigApiBindings_0 :
     zigApiBindings.get! 0 = ("Shape.init", "Shape.initVerified") := rfl
@@ -3457,133 +3295,124 @@ def zigApiBindings : List (String × String) :=
     zigApiBindings.get! 46 = ("Tensor.unsqueeze", "Tensor.unsqueezeVerified") := rfl
 
 @[simp] theorem zigApiBindings_47 :
-    zigApiBindings.get! 47 = ("Tensor.relu", "Tensor.reluVerified") := rfl
+    zigApiBindings.get! 47 = ("Tensor.zeros", "Tensor.zeros") := rfl
 
 @[simp] theorem zigApiBindings_48 :
-    zigApiBindings.get! 48 = ("Tensor.softmax", "Tensor.softmaxVerified") := rfl
+    zigApiBindings.get! 48 = ("Tensor.ones", "Tensor.ones") := rfl
 
 @[simp] theorem zigApiBindings_49 :
-    zigApiBindings.get! 49 = ("Tensor.zeros", "Tensor.zeros") := rfl
+    zigApiBindings.get! 49 = ("Tensor.full", "Tensor.full") := rfl
 
 @[simp] theorem zigApiBindings_50 :
-    zigApiBindings.get! 50 = ("Tensor.ones", "Tensor.ones") := rfl
+    zigApiBindings.get! 50 = ("Tensor.randomUniform", "Tensor.randomUniformVerified") := rfl
 
 @[simp] theorem zigApiBindings_51 :
-    zigApiBindings.get! 51 = ("Tensor.full", "Tensor.full") := rfl
+    zigApiBindings.get! 51 = ("Tensor.randomNormal", "Tensor.randomNormalVerified") := rfl
 
 @[simp] theorem zigApiBindings_52 :
-    zigApiBindings.get! 52 = ("Tensor.randomUniform", "Tensor.randomUniformVerified") := rfl
+    zigApiBindings.get! 52 = ("Tensor.identity", "Tensor.identityVerified") := rfl
 
 @[simp] theorem zigApiBindings_53 :
-    zigApiBindings.get! 53 = ("Tensor.randomNormal", "Tensor.randomNormalVerified") := rfl
+    zigApiBindings.get! 53 = ("Tensor.pad", "Tensor.padVerified") := rfl
 
 @[simp] theorem zigApiBindings_54 :
-    zigApiBindings.get! 54 = ("Tensor.identity", "Tensor.identityVerified") := rfl
+    zigApiBindings.get! 54 = ("Tensor.tile", "Tensor.tileVerified") := rfl
 
 @[simp] theorem zigApiBindings_55 :
-    zigApiBindings.get! 55 = ("Tensor.conv2d", "Tensor.conv2dVerified") := rfl
+    zigApiBindings.get! 55 = ("Tensor.concat", "Tensor.concatVerified") := rfl
 
 @[simp] theorem zigApiBindings_56 :
-    zigApiBindings.get! 56 = ("Tensor.pad", "Tensor.padVerified") := rfl
+    zigApiBindings.get! 56 = ("Tensor.stack", "Tensor.stackVerified") := rfl
 
 @[simp] theorem zigApiBindings_57 :
-    zigApiBindings.get! 57 = ("Tensor.tile", "Tensor.tileVerified") := rfl
+    zigApiBindings.get! 57 = ("Tensor.argmax", "Tensor.argmax") := rfl
 
 @[simp] theorem zigApiBindings_58 :
-    zigApiBindings.get! 58 = ("Tensor.concat", "Tensor.concatVerified") := rfl
+    zigApiBindings.get! 58 = ("Tensor.argmin", "Tensor.argmin") := rfl
 
 @[simp] theorem zigApiBindings_59 :
-    zigApiBindings.get! 59 = ("Tensor.stack", "Tensor.stackVerified") := rfl
+    zigApiBindings.get! 59 = ("Tensor.cumsum", "Tensor.cumsum") := rfl
 
 @[simp] theorem zigApiBindings_60 :
-    zigApiBindings.get! 60 = ("Tensor.argmax", "Tensor.argmax") := rfl
+    zigApiBindings.get! 60 = ("Tensor.variance", "Tensor.variance") := rfl
 
 @[simp] theorem zigApiBindings_61 :
-    zigApiBindings.get! 61 = ("Tensor.argmin", "Tensor.argmin") := rfl
+    zigApiBindings.get! 61 = ("Tensor.stddev", "Tensor.stddev") := rfl
 
 @[simp] theorem zigApiBindings_62 :
-    zigApiBindings.get! 62 = ("Tensor.cumsum", "Tensor.cumsum") := rfl
+    zigApiBindings.get! 62 = ("Tensor.sort", "Tensor.sort") := rfl
 
 @[simp] theorem zigApiBindings_63 :
-    zigApiBindings.get! 63 = ("Tensor.variance", "Tensor.variance") := rfl
+    zigApiBindings.get! 63 = ("Tensor.lessThan", "Tensor.sort.lessThan") := rfl
 
 @[simp] theorem zigApiBindings_64 :
-    zigApiBindings.get! 64 = ("Tensor.stddev", "Tensor.stddev") := rfl
+    zigApiBindings.get! 64 = ("Tensor.greaterThan", "Tensor.sort.greaterThan") := rfl
 
 @[simp] theorem zigApiBindings_65 :
-    zigApiBindings.get! 65 = ("Tensor.sort", "Tensor.sort") := rfl
+    zigApiBindings.get! 65 = ("Tensor.unique", "Tensor.unique") := rfl
 
 @[simp] theorem zigApiBindings_66 :
-    zigApiBindings.get! 66 = ("Tensor.lessThan", "Tensor.sort.lessThan") := rfl
+    zigApiBindings.get! 66 = ("Tensor.oneHot", "Tensor.oneHot") := rfl
 
 @[simp] theorem zigApiBindings_67 :
-    zigApiBindings.get! 67 = ("Tensor.greaterThan", "Tensor.sort.greaterThan") := rfl
+    zigApiBindings.get! 67 = ("Tensor.isClose", "Tensor.isClose") := rfl
 
 @[simp] theorem zigApiBindings_68 :
-    zigApiBindings.get! 68 = ("Tensor.unique", "Tensor.unique") := rfl
+    zigApiBindings.get! 68 = ("Tensor.toInt", "Tensor.toInt") := rfl
 
 @[simp] theorem zigApiBindings_69 :
-    zigApiBindings.get! 69 = ("Tensor.oneHot", "Tensor.oneHot") := rfl
+    zigApiBindings.get! 69 = ("Tensor.spectralNorm", "Tensor.spectralNormVerified") := rfl
 
 @[simp] theorem zigApiBindings_70 :
-    zigApiBindings.get! 70 = ("Tensor.isClose", "Tensor.isClose") := rfl
+    zigApiBindings.get! 70 = ("Tensor.normL2", "Tensor.normL2") := rfl
 
 @[simp] theorem zigApiBindings_71 :
-    zigApiBindings.get! 71 = ("Tensor.toInt", "Tensor.toInt") := rfl
+    zigApiBindings.get! 71 = ("Tensor.dot", "Tensor.dot") := rfl
 
 @[simp] theorem zigApiBindings_72 :
-    zigApiBindings.get! 72 = ("Tensor.spectralNorm", "Tensor.spectralNormVerified") := rfl
+    zigApiBindings.get! 72 = ("Tensor.outer", "Tensor.outer") := rfl
 
 @[simp] theorem zigApiBindings_73 :
-    zigApiBindings.get! 73 = ("Tensor.normL2", "Tensor.normL2") := rfl
+    zigApiBindings.get! 73 = ("Tensor.trace", "Tensor.trace") := rfl
 
 @[simp] theorem zigApiBindings_74 :
-    zigApiBindings.get! 74 = ("Tensor.dot", "Tensor.dot") := rfl
+    zigApiBindings.get! 74 = ("Tensor.norm", "Tensor.normChecked") := rfl
 
 @[simp] theorem zigApiBindings_75 :
-    zigApiBindings.get! 75 = ("Tensor.outer", "Tensor.outer") := rfl
+    zigApiBindings.get! 75 = ("Tensor.inverse", "Tensor.inverseVerified") := rfl
 
 @[simp] theorem zigApiBindings_76 :
-    zigApiBindings.get! 76 = ("Tensor.trace", "Tensor.trace") := rfl
+    zigApiBindings.get! 76 = ("Tensor.det", "Tensor.detVerified") := rfl
 
 @[simp] theorem zigApiBindings_77 :
-    zigApiBindings.get! 77 = ("Tensor.norm", "Tensor.normChecked") := rfl
+    zigApiBindings.get! 77 = ("Tensor.lu", "Tensor.luVerified") := rfl
 
 @[simp] theorem zigApiBindings_78 :
-    zigApiBindings.get! 78 = ("Tensor.inverse", "Tensor.inverseVerified") := rfl
+    zigApiBindings.get! 78 = ("Tensor.qr", "Tensor.qrVerified") := rfl
 
 @[simp] theorem zigApiBindings_79 :
-    zigApiBindings.get! 79 = ("Tensor.det", "Tensor.detVerified") := rfl
+    zigApiBindings.get! 79 = ("Tensor.svd", "Tensor.svdVerified") := rfl
 
 @[simp] theorem zigApiBindings_80 :
-    zigApiBindings.get! 80 = ("Tensor.lu", "Tensor.luVerified") := rfl
+    zigApiBindings.get! 80 = ("Tensor.eig", "Tensor.eigVerified") := rfl
 
 @[simp] theorem zigApiBindings_81 :
-    zigApiBindings.get! 81 = ("Tensor.qr", "Tensor.qrVerified") := rfl
+    zigApiBindings.get! 81 = ("Tensor.cholesky", "Tensor.choleskyVerified") := rfl
 
 @[simp] theorem zigApiBindings_82 :
-    zigApiBindings.get! 82 = ("Tensor.svd", "Tensor.svdVerified") := rfl
+    zigApiBindings.get! 82 = ("Tensor.solve", "Tensor.solveVerified") := rfl
 
 @[simp] theorem zigApiBindings_83 :
-    zigApiBindings.get! 83 = ("Tensor.eig", "Tensor.eigVerified") := rfl
+    zigApiBindings.get! 83 = ("Tensor.clip", "Tensor.clipVerified") := rfl
 
 @[simp] theorem zigApiBindings_84 :
-    zigApiBindings.get! 84 = ("Tensor.cholesky", "Tensor.choleskyVerified") := rfl
+    zigApiBindings.get! 84 = ("Tensor.toFixed", "Tensor.toFixed") := rfl
 
 @[simp] theorem zigApiBindings_85 :
-    zigApiBindings.get! 85 = ("Tensor.solve", "Tensor.solveVerified") := rfl
+    zigApiBindings.get! 85 = ("Tensor.arange", "Tensor.arange") := rfl
 
 @[simp] theorem zigApiBindings_86 :
-    zigApiBindings.get! 86 = ("Tensor.clip", "Tensor.clipVerified") := rfl
-
-@[simp] theorem zigApiBindings_87 :
-    zigApiBindings.get! 87 = ("Tensor.toFixed", "Tensor.toFixed") := rfl
-
-@[simp] theorem zigApiBindings_88 :
-    zigApiBindings.get! 88 = ("Tensor.arange", "Tensor.arange") := rfl
-
-@[simp] theorem zigApiBindings_89 :
-    zigApiBindings.get! 89 = ("Tensor.linspace", "Tensor.linspace") := rfl
+    zigApiBindings.get! 86 = ("Tensor.linspace", "Tensor.linspace") := rfl
 
 
 

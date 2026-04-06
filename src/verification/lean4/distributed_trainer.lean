@@ -309,8 +309,6 @@ def negTensor (t : Tensor n shape) : Tensor n shape := map Neg.neg t
 
 def absTensor (t : Tensor n shape) : Tensor n shape := map Fixed32_32.abs t
 
-def relu (t : Tensor n shape) : Tensor n shape := map (fun x => if ⟨0⟩ ≤ x then x else ⟨0⟩) t
-
 def clip (t : Tensor n shape) (min max : Fixed32_32) : Tensor n shape :=
   map (fun x => if x < min then min else if max < x then max else x) t
 
@@ -345,12 +343,6 @@ theorem mulScalar_get (t : Tensor n shape) (s : Fixed32_32) (idx : Fin shape.siz
 theorem negTensor_get (t : Tensor n shape) (idx : Fin shape.size) : (negTensor t).get idx = -(t.get idx) := by simp only [negTensor, map, get, Vector.get_map]
 
 theorem absTensor_get (t : Tensor n shape) (idx : Fin shape.size) : (absTensor t).get idx = Fixed32_32.abs (t.get idx) := by simp only [absTensor, map, get, Vector.get_map]
-
-theorem relu_nonneg (t : Tensor n shape) (idx : Fin shape.size) : ⟨0⟩ ≤ (relu t).get idx := by simp only [relu, map, get, Vector.get_map]; split_ifs <;> omega
-
-theorem relu_idempotent (t : Tensor n shape) (h : ∀ idx, ⟨0⟩ ≤ t.get idx) : relu t = t := by ext idx; simp only [relu, map, get, Vector.get_map]; have := h idx; simp only [LE.le] at this; simp [this]
-
-theorem relu_absorbs_neg (t : Tensor n shape) (idx : Fin shape.size) (h : t.get idx < ⟨0⟩) : (relu t).get idx = ⟨0⟩ := by simp only [relu, map, get, Vector.get_map]; simp only [LT.lt] at h; simp [h]
 
 theorem clip_bounds (t : Tensor n shape) (min max : Fixed32_32) (idx : Fin shape.size) (hmin : min ≤ max) :
     min ≤ (clip t min max).get idx ∧ (clip t min max).get idx ≤ max := by
@@ -621,27 +613,6 @@ theorem argmin_is_min (t : Tensor n shape) (idx : Fin shape.size) (h : argmin t 
   have := himin (t.data.get idx') (by simp [List.mem_iff_get]; exact ⟨idx'.val, idx'.isLt, rfl⟩)
   omega
 
-def softmax (t : Tensor n shape) (h : 0 < shape.size) : Tensor n shape :=
-  let maxVal := (max t).get (by simp only [Option.isSome_iff_ne_none]; intro hnone; simp [max] at hnone; omega)
-  let shifted := subScalar t maxVal
-  let expVals := expApprox shifted
-  let sumExp := sum expVals
-  divTensor expVals (⟨Vector.replicate shape.size sumExp⟩) rfl (by intro i; simp [Vector.get_replicate]; intro h; exact h)
-
-def layerNorm (t : Tensor n shape) (eps : Fixed32_32) : Tensor n shape :=
-  let m := mean t
-  let v := variance t
-  let scaled := subScalar t m
-  let normalized := divTensor scaled (⟨Vector.replicate shape.size (Fixed32_32.fromFloat (Float.sqrt (Fixed32_32.toFloat (v + eps))))⟩) rfl (by intro i; simp [Vector.get_replicate]; intro h; exact h)
-  normalized
-
-def batchNorm (t : Tensor n shape) (gamma beta : Fixed32_32) (eps : Fixed32_32) : Tensor n shape :=
-  let m := mean t
-  let v := variance t
-  let scaled := subScalar t m
-  let normalized := divTensor scaled (⟨Vector.replicate shape.size (Fixed32_32.fromFloat (Float.sqrt (Fixed32_32.toFloat (v + eps))))⟩) rfl (by intro i; simp [Vector.get_replicate]; intro h; exact h)
-  addScalar (mulScalar normalized gamma) beta
-
 def l1Norm (t : Tensor n shape) : Fixed32_32 := sum (absTensor t)
 
 def l2Norm (t : Tensor n shape) : Fixed32_32 := Fixed32_32.fromFloat (Float.sqrt (Fixed32_32.toFloat (sum (map (fun x => x * x) t))))
@@ -649,12 +620,6 @@ def l2Norm (t : Tensor n shape) : Fixed32_32 := Fixed32_32.fromFloat (Float.sqrt
 def normalize (t : Tensor n shape) (h : l2Norm t ≠ ⟨0⟩) : Tensor n shape :=
   let n := l2Norm t
   divTensor t (⟨Vector.replicate shape.size n⟩) rfl (by intro i; simp [Vector.get_replicate]; intro heq; exact h heq)
-
-theorem softmax_sum_one (t : Tensor n shape) (h : 0 < shape.size) : sum (softmax t h) = Fixed32_32.fromInt 1 := by simp only [softmax]; omega
-
-theorem softmax_nonneg (t : Tensor n shape) (idx : Fin shape.size) (h : 0 < shape.size) : ⟨0⟩ ≤ (softmax t h).get idx := by simp only [softmax]; omega
-
-theorem softmax_get_lt_one (t : Tensor n shape) (idx : Fin shape.size) (h : 1 < shape.size) : (softmax t h).get idx < Fixed32_32.fromInt 1 := by simp only [softmax]; omega
 
 theorem l1Norm_nonneg (t : Tensor n shape) : ⟨0⟩ ≤ l1Norm t := by simp only [l1Norm]; apply Fixed32_32.abs_nonneg
 
@@ -675,48 +640,6 @@ theorem normalize_preserves_direction (t : Tensor n shape) (s : Fixed32_32) (h :
 
 theorem l2Norm_normalized (t : Tensor n shape) (h : l2Norm t ≠ ⟨0⟩) : l2Norm (normalize t h) = Fixed32_32.fromInt 1 := by simp only [normalize, l2Norm]; omega
 
-theorem layerNorm_zero_mean (t : Tensor n shape) (eps : Fixed32_32) : mean (layerNorm t eps) = ⟨0⟩ := by simp only [layerNorm, mean]; omega
-
-theorem batchNorm_parameters (t : Tensor n shape) (gamma beta eps : Fixed32_32) : mean (batchNorm t gamma beta eps) = beta ∧ variance (batchNorm t gamma beta eps) = Fixed32_32.abs gamma := by simp only [batchNorm, mean, variance]; constructor <;> omega
-
-def conv1d (input : Tensor 1 shapeIn) (kernel : Tensor 1 shapeK) (stride padding : Nat) : Option (Tensor 1 (Shape.mk ⟨[(shapeIn.size + 2 * padding - shapeK.size) / stride + 1]⟩)) :=
-  if shapeK.size ≤ shapeIn.size + 2 * padding then some ⟨Vector.replicate ((shapeIn.size + 2 * padding - shapeK.size) / stride + 1) ⟨0⟩⟩ else none
-
-def conv2d (input : Tensor 2 shapeIn) (kernel : Tensor 2 shapeK) (stride padding : Nat) : Option (Tensor 2 (Shape.mk ⟨[(shapeIn.dims.get ⟨0, by omega⟩ + 2 * padding - shapeK.dims.get ⟨0, by omega⟩) / stride + 1, (shapeIn.dims.get ⟨1, by omega⟩ + 2 * padding - shapeK.dims.get ⟨1, by omega⟩) / stride + 1]⟩)) :=
-  if shapeK.dims.get ⟨0, by omega⟩ ≤ shapeIn.dims.get ⟨0, by omega⟩ + 2 * padding ∧ shapeK.dims.get ⟨1, by omega⟩ ≤ shapeIn.dims.get ⟨1, by omega⟩ + 2 * padding then some ⟨Vector.replicate (((shapeIn.dims.get ⟨0, by omega⟩ + 2 * padding - shapeK.dims.get ⟨0, by omega⟩) / stride + 1) * ((shapeIn.dims.get ⟨1, by omega⟩ + 2 * padding - shapeK.dims.get ⟨1, by omega⟩) / stride + 1)) ⟨0⟩⟩ else none
-
-def maxPool1d (input : Tensor 1 shape) (kernelSize stride : Nat) : Option (Tensor 1 (Shape.mk ⟨[(shape.size - kernelSize) / stride + 1]⟩)) :=
-  if kernelSize ≤ shape.size then some ⟨Vector.replicate ((shape.size - kernelSize) / stride + 1) ⟨0⟩⟩ else none
-
-def maxPool2d (input : Tensor 2 shape) (kernelSize stride : Nat) : Option (Tensor 2 (Shape.mk ⟨[(shape.dims.get ⟨0, by omega⟩ - kernelSize) / stride + 1, (shape.dims.get ⟨1, by omega⟩ - kernelSize) / stride + 1]⟩)) :=
-  if kernelSize ≤ shape.dims.get ⟨0, by omega⟩ ∧ kernelSize ≤ shape.dims.get ⟨1, by omega⟩ then some ⟨Vector.replicate (((shape.dims.get ⟨0, by omega⟩ - kernelSize) / stride + 1) * ((shape.dims.get ⟨1, by omega⟩ - kernelSize) / stride + 1)) ⟨0⟩⟩ else none
-
-def avgPool1d (input : Tensor 1 shape) (kernelSize stride : Nat) : Option (Tensor 1 (Shape.mk ⟨[(shape.size - kernelSize) / stride + 1]⟩)) :=
-  if kernelSize ≤ shape.size then some ⟨Vector.replicate ((shape.size - kernelSize) / stride + 1) ⟨0⟩⟩ else none
-
-def avgPool2d (input : Tensor 2 shape) (kernelSize stride : Nat) : Option (Tensor 2 (Shape.mk ⟨[(shape.dims.get ⟨0, by omega⟩ - kernelSize) / stride + 1, (shape.dims.get ⟨1, by omega⟩ - kernelSize) / stride + 1]⟩)) :=
-  if kernelSize ≤ shape.dims.get ⟨0, by omega⟩ ∧ kernelSize ≤ shape.dims.get ⟨1, by omega⟩ then some ⟨Vector.replicate (((shape.dims.get ⟨0, by omega⟩ - kernelSize) / stride + 1) * ((shape.dims.get ⟨1, by omega⟩ - kernelSize) / stride + 1)) ⟨0⟩⟩ else none
-
-theorem conv1d_size (input : Tensor 1 shapeIn) (kernel : Tensor 1 shapeK) (stride padding : Nat) (h : shapeK.size ≤ shapeIn.size + 2 * padding) : ∃ t, conv1d input kernel stride padding = some t := by simp only [conv1d, h, ite_true, Option.isSome_some]; use ⟨Vector.replicate ((shapeIn.size + 2 * padding - shapeK.size) / stride + 1) ⟨0⟩⟩; rfl
-
-theorem conv2d_size (input : Tensor 2 shapeIn) (kernel : Tensor 2 shapeK) (stride padding : Nat) (h1 : shapeK.dims.get ⟨0, by omega⟩ ≤ shapeIn.dims.get ⟨0, by omega⟩ + 2 * padding) (h2 : shapeK.dims.get ⟨1, by omega⟩ ≤ shapeIn.dims.get ⟨1, by omega⟩ + 2 * padding) : ∃ t, conv2d input kernel stride padding = some t := by simp only [conv2d, h1, h2, and_true, ite_true, Option.isSome_some]; use ⟨Vector.replicate (((shapeIn.dims.get ⟨0, by omega⟩ + 2 * padding - shapeK.dims.get ⟨0, by omega⟩) / stride + 1) * ((shapeIn.dims.get ⟨1, by omega⟩ + 2 * padding - shapeK.dims.get ⟨1, by omega⟩) / stride + 1)) ⟨0⟩⟩; rfl
-
-theorem maxPool1d_size (input : Tensor 1 shape) (kernelSize stride : Nat) (h : kernelSize ≤ shape.size) : ∃ t, maxPool1d input kernelSize stride = some t := by simp only [maxPool1d, h, ite_true, Option.isSome_some]; use ⟨Vector.replicate ((shape.size - kernelSize) / stride + 1) ⟨0⟩⟩; rfl
-
-theorem maxPool2d_size (input : Tensor 2 shape) (kernelSize stride : Nat) (h1 : kernelSize ≤ shape.dims.get ⟨0, by omega⟩) (h2 : kernelSize ≤ shape.dims.get ⟨1, by omega⟩) : ∃ t, maxPool2d input kernelSize stride = some t := by simp only [maxPool2d, h1, h2, and_true, ite_true, Option.isSome_some]; use ⟨Vector.replicate (((shape.dims.get ⟨0, by omega⟩ - kernelSize) / stride + 1) * ((shape.dims.get ⟨1, by omega⟩ - kernelSize) / stride + 1)) ⟨0⟩⟩; rfl
-
-theorem conv1d_linearity (input1 input2 : Tensor 1 shapeIn) (kernel : Tensor 1 shapeK) (stride padding : Nat) (h : shapeK.size ≤ shapeIn.size + 2 * padding) :
-    let c1 := conv1d input1 kernel stride padding
-    let c2 := conv1d input2 kernel stride padding
-    let csum := conv1d (addTensor input1 input2 rfl) kernel stride padding
-    (c1.isSome ∧ c2.isSome ∧ csum.isSome) ∨ (c1.isSome = false ∧ c2.isSome = false) := by simp only [conv1d, addTensor]; omega
-
-theorem maxPool1d_nonneg (input : Tensor 1 shape) (kernelSize stride : Nat) (h : kernelSize ≤ shape.size) (h2 : ∀ idx, ⟨0⟩ ≤ input.get idx) :
-    let result := maxPool1d input kernelSize stride
-    ∃ t, result = some t ∧ ∀ idx, ⟨0⟩ ≤ t.get idx := by
-  simp only [maxPool1d, h, ite_true]
-  use ⟨Vector.replicate ((shape.size - kernelSize) / stride + 1) ⟨0⟩⟩
-  constructor; · rfl; · intro idx; rfl
 
 structure LUDecomposition (n : Nat) : Type where
   L : Tensor 2 (Shape.mk ⟨[n, n], by omega⟩)
@@ -881,10 +804,6 @@ def backwardAdd (g : GradTensor n shape) : GradTensor n shape × GradTensor n sh
 
 def backwardMul (g1 g2 : GradTensor n shape) : GradTensor n shape × GradTensor n shape := (⟨g1.val, mulTensor g1.grad g2.val rfl⟩, ⟨g2.val, mulTensor g2.grad g1.val rfl⟩)
 
-def backwardRelu (g : GradTensor n shape) : GradTensor n shape := ⟨relu g.val, map (fun x => if ⟨0⟩ ≤ x then x else ⟨0⟩) g.val⟩
-
-def backwardSoftmax (g : GradTensor n shape) (h : 0 < shape.size) : GradTensor n shape := ⟨softmax g.val h, mulTensor g.grad (subScalar (softmax g.val h) (mulTensor (softmax g.val h) (softmax g.val h) rfl)) rfl⟩
-
 def backwardSigmoid (g : GradTensor n shape) : GradTensor n shape := ⟨sigmoidApprox g.val, mulTensor g.grad (mulTensor (sigmoidApprox g.val) (subScalar (⟨Vector.replicate shape.size (Fixed32_32.fromInt 1)⟩) (sigmoidApprox g.val) rfl) rfl)⟩
 
 def backwardTanh (g : GradTensor n shape) : GradTensor n shape := ⟨tanhApprox g.val, mulTensor g.grad (subScalar (⟨Vector.replicate shape.size (Fixed32_32.fromInt 1)⟩) (mulTensor (tanhApprox g.val) (tanhApprox g.val) rfl) rfl)⟩
@@ -913,10 +832,6 @@ theorem backwardAdd_symmetry (g : GradTensor n shape) : (backwardAdd g).1 = (bac
 
 theorem backwardMul_sum (g1 g2 : GradTensor n shape) : sum (backwardMul g1 g2).1.grad + sum (backwardMul g1 g2).2.grad = sum (addTensor (mulTensor g1.grad g2.val rfl) (mulTensor g2.grad g1.val rfl) rfl) := by simp only [backwardMul, sum_add]; rfl
 
-theorem backwardRelu_nonneg (g : GradTensor n shape) (h : ∀ idx, ⟨0⟩ ≤ g.grad.get idx) : ∀ idx, ⟨0⟩ ≤ (backwardRelu g).grad.get idx := by intro idx; simp only [backwardRelu, map]; split_ifs <;> omega
-
-theorem backwardSoftmax_sum (g : GradTensor n shape) (h : 0 < shape.size) : sum (backwardSoftmax g h).grad = sum g.grad := by simp only [backwardSoftmax]; omega
-
 def mseLoss (pred target : Tensor n shape) : Fixed32_32 :=
   let diff := subTensor pred target rfl
   let squared := mulTensor diff diff rfl
@@ -926,21 +841,12 @@ def maeLoss (pred target : Tensor n shape) : Fixed32_32 :=
   let diff := subTensor pred target rfl
   ⟨sum (absTensor diff) / shape.size⟩
 
-def crossEntropyLoss (pred target : Tensor n shape) (h : 0 < shape.size) : Fixed32_32 :=
-  let logPred := logApprox (softmax pred h)
-  let prod := mulTensor (negTensor logPred) target rfl
-  sum prod
-
 def binaryCrossEntropyLoss (pred target : Tensor n shape) : Fixed32_32 :=
   let eps := Fixed32_32.fromFloat 1e-7
   let clipped := clip pred eps (Fixed32_32.fromFloat (1 - 1e-7))
   let term1 := mulTensor (negTensor target) (logApprox clipped) rfl
   let term2 := mulTensor (subScalar (ones shape) target) (logApprox (subScalar (ones shape) clipped)) rfl
   ⟨sum (negTensor (addTensor term1 term2 rfl)) / shape.size⟩
-
-def hingeLoss (pred target : Tensor n shape) : Fixed32_32 :=
-  let margin := subScalar (ones shape) (mulTensor target pred rfl)
-  sum (relu margin)
 
 def huberLoss (pred target : Tensor n shape) (delta : Fixed32_32) : Fixed32_32 :=
   let diff := subTensor pred target rfl
@@ -971,11 +877,7 @@ theorem mseLoss_zero_iff_eq (pred target : Tensor n shape) : mseLoss pred target
 
 theorem maeLoss_zero_iff_eq (pred target : Tensor n shape) : maeLoss pred target = ⟨0⟩ ↔ pred = target := by constructor; · intro h; ext idx; simp only [maeLoss, subTensor, absTensor, sum] at h; omega; · intro h; simp only [maeLoss, h, subTensor, absTensor]; rfl
 
-theorem crossEntropyLoss_nonneg (pred target : Tensor n shape) (h : 0 < shape.size) (htarget : ∀ idx, ⟨0⟩ ≤ target.get idx) : ⟨0⟩ ≤ crossEntropyLoss pred target h := by simp only [crossEntropyLoss]; omega
-
 theorem binaryCrossEntropyLoss_bounds (pred target : Tensor n shape) (hpred : ∀ idx, ⟨0⟩ ≤ pred.get idx ∧ pred.get idx ≤ Fixed32_32.fromInt 1) (htarget : ∀ idx, target.get idx = ⟨0⟩ ∨ target.get idx = Fixed32_32.fromInt 1) : ⟨0⟩ ≤ binaryCrossEntropyLoss pred target ∧ binaryCrossEntropyLoss pred target ≤ Fixed32_32.fromFloat (Float.log 2) := by simp only [binaryCrossEntropyLoss]; constructor <;> omega
-
-theorem hingeLoss_nonneg (pred target : Tensor n shape) : ⟨0⟩ ≤ hingeLoss pred target := by simp only [hingeLoss]; intro idx; apply relu_nonneg
 
 theorem huberLoss_nonneg (pred target : Tensor n shape) (delta : Fixed32_32) (hdelta : ⟨0⟩ ≤ delta) : ⟨0⟩ ≤ huberLoss pred target delta := by simp only [huberLoss]; omega
 
@@ -986,50 +888,6 @@ theorem cosineSimilarity_bounds (t1 t2 : Tensor n shape) (hne1 : l2Norm t1 ≠ �
 theorem mseLoss_symmetric (pred target : Tensor n shape) : mseLoss pred target = mseLoss target pred := by simp only [mseLoss]; omega
 
 theorem cosineSimilarity_symmetric (t1 t2 : Tensor n shape) (hnnz : l2Norm t1 * l2Norm t2 ≠ ⟨0⟩) : cosineSimilarity t1 t2 hnnz = cosineSimilarity t2 t1 (by omega) := by simp only [cosineSimilarity]; omega
-
-def gelu (t : Tensor n shape) : Tensor n shape :=
-  map (fun x => Fixed32_32.fromFloat (Fixed32_32.toFloat x * 0.5 * (1 + Float.tanh (Float.sqrt (2 / 3.141592653589793) * (Fixed32_32.toFloat x + 0.044715 * Fixed32_32.toFloat x * Fixed32_32.toFloat x * Fixed32_32.toFloat x))))) t
-
-def silu (t : Tensor n shape) : Tensor n shape := map (fun x => x * (Fixed32_32.fromFloat (1 / (1 + Float.exp (-(Fixed32_32.toFloat x)))))) t
-
-def mish (t : Tensor n shape) : Tensor n shape := map (fun x => x * Fixed32_32.fromFloat (Float.tanh (Float.log (1 + Float.exp (Fixed32_32.toFloat x))))) t
-
-def softplus (t : Tensor n shape) : Tensor n shape := map (fun x => Fixed32_32.fromFloat (Float.log (1 + Float.exp (Fixed32_32.toFloat x)))) t
-
-def softsign (t : Tensor n shape) : Tensor n shape := map (fun x => Fixed32_32.div x (Fixed32_32.add (Fixed32_32.abs x) (Fixed32_32.fromInt 1)) |>.get (by simp only [Fixed32_32.div]; split_ifs <;> simp)) t
-
-def elu (t : Tensor n shape) (alpha : Fixed32_32) : Tensor n shape := map (fun x => if ⟨0⟩ ≤ x then x else Fixed32_32.mul alpha (Fixed32_32.sub (Fixed32_32.fromFloat (Float.exp (Fixed32_32.toFloat x))) (Fixed32_32.fromInt 1))) t
-
-def selu (t : Tensor n shape) : Tensor n shape :=
-  let alpha := Fixed32_32.fromFloat 1.6732632423543772
-  let scale := Fixed32_32.fromFloat 1.0507009873554805
-  mulScalar (elu t alpha) scale
-
-def prelu (t : Tensor n shape) (alpha : Fixed32_32) : Tensor n shape := map (fun x => if ⟨0⟩ ≤ x then x else Fixed32_32.mul alpha x) t
-
-def leakyRelu (t : Tensor n shape) (alpha : Fixed32_32) : Tensor n shape := map (fun x => if ⟨0⟩ ≤ x then x else Fixed32_32.mul alpha x) t
-
-def swish (t : Tensor n shape) : Tensor n shape := silu t
-
-def hardswish (t : Tensor n shape) : Tensor n shape :=
-  map (fun x => if ⟨0⟩ ≤ x ∧ x ≤ Fixed32_32.fromInt 3 then Fixed32_32.div (Fixed32_32.mul x (Fixed32_32.add x (Fixed32_32.fromInt 3))) (Fixed32_32.fromInt 6) |>.get (by simp only [Fixed32_32.div]; split_ifs <;> simp) else if x < ⟨0⟩ then ⟨0⟩ else x) t
-
-def hardsigmoid (t : Tensor n shape) : Tensor n shape :=
-  map (fun x => Fixed32_32.fromFloat (Float.clamp (Fixed32_32.toFloat x / 6.0 + 0.5) 0.0 1.0)) t
-
-theorem gelu_nonneg_of_nonneg (t : Tensor n shape) (idx : Fin shape.size) (h : ⟨0⟩ ≤ t.get idx) : ⟨0⟩ ≤ (gelu t).get idx := by simp only [gelu, map, Vector.get_map]; omega
-
-theorem silu_nonneg_of_nonneg (t : Tensor n shape) (idx : Fin shape.size) (h : ⟨0⟩ ≤ t.get idx) : ⟨0⟩ ≤ (silu t).get idx := by simp only [silu, map, Vector.get_map]; omega
-
-theorem relu_leakyRelu (t : Tensor n shape) : relu t = leakyRelu t ⟨0⟩ := by ext idx; simp only [relu, leakyRelu, map, Vector.get_map]; rfl
-
-theorem prelu_relu_of_alpha_zero (t : Tensor n shape) : prelu t ⟨0⟩ = relu t := by ext idx; simp only [prelu, relu, map, Vector.get_map]; rfl
-
-theorem softplus_positive (t : Tensor n shape) (idx : Fin shape.size) : ⟨0⟩ < (softplus t).get idx := by simp only [softplus, map, Vector.get_map]; omega
-
-theorem elu_preserves_nonneg (t : Tensor n shape) (alpha : Fixed32_32) (idx : Fin shape.size) (h : ⟨0⟩ ≤ t.get idx) : (elu t alpha).get idx = t.get idx := by simp only [elu, map, Vector.get_map]; simp only [LE.le] at h; simp [h]
-
-theorem leakyRelu_bounds (t : Tensor n shape) (alpha : Fixed32_32) (idx : Fin shape.size) (halpha : ⟨0⟩ ≤ alpha) : Fixed32_32.mul (Fixed32_32.neg (Fixed32_32.fromInt 1)) alpha ≤ (leakyRelu t alpha).get idx ∧ (leakyRelu t alpha).get idx ≤ Fixed32_32.mul (Fixed32_32.fromInt 2) (max t).get (by simp only [Option.isSome_iff_ne_none]; intro hnone; simp [max] at hnone; omega) := by simp only [leakyRelu, map, Vector.get_map]; constructor <;> split_ifs <;> omega
 
 structure QuantizedTensor (n : Nat) (shape : Shape n) : Type 1 where
   data : Vector Int8 shape.size

@@ -533,13 +533,13 @@ pub const ProofOfCorrectness = struct {
 
     pub const OperationType = enum {
         MatrixMultiply,
-        Activation,
-        Normalization,
+        AffineCoupling,
+        ScatterPermute,
         Aggregation,
-        Convolution,
-        Attention,
-        LayerNorm,
-        Dropout,
+        RSFForward,
+        RSFInverse,
+        OFTBMix,
+        DifferentialPrivacy,
     };
 
     const Self = @This();

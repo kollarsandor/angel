@@ -102,12 +102,6 @@ const int64_t *futhark_shape_u64_1d(struct futhark_context *ctx, struct futhark_
 // Entry points
 int futhark_entry_add_arrays(struct futhark_context *ctx, struct futhark_f32_1d **out0, const struct futhark_f32_1d *in0, const struct futhark_f32_1d *in1);
 int futhark_entry_add_scalar(struct futhark_context *ctx, struct futhark_f32_1d **out0, const struct futhark_f32_1d *in0, const float in1);
-int futhark_entry_apply_conv1d(struct futhark_context *ctx, struct futhark_f32_1d **out0, const struct futhark_f32_1d *in0, const struct futhark_f32_1d *in1);
-int futhark_entry_apply_gelu(struct futhark_context *ctx, struct futhark_f32_1d **out0, const struct futhark_f32_1d *in0);
-int futhark_entry_apply_layer_norm(struct futhark_context *ctx, struct futhark_f32_1d **out0, const struct futhark_f32_1d *in0, const struct futhark_f32_1d *in1, const struct futhark_f32_1d *in2, const float in3);
-int futhark_entry_apply_maxpool1d(struct futhark_context *ctx, struct futhark_f32_1d **out0, const struct futhark_f32_1d *in0, const int64_t in1);
-int futhark_entry_apply_relu(struct futhark_context *ctx, struct futhark_f32_1d **out0, const struct futhark_f32_1d *in0);
-int futhark_entry_apply_softmax(struct futhark_context *ctx, struct futhark_f32_1d **out0, const struct futhark_f32_1d *in0);
 int futhark_entry_array_max(struct futhark_context *ctx, float *out0, const struct futhark_f32_1d *in0);
 int futhark_entry_array_mean(struct futhark_context *ctx, float *out0, const struct futhark_f32_1d *in0);
 int futhark_entry_array_min(struct futhark_context *ctx, float *out0, const struct futhark_f32_1d *in0);

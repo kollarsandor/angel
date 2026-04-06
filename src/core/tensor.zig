@@ -953,72 +953,6 @@ pub const Tensor = struct {
         return .{ .data = self.data, .base_data = self.base_data, .shape = new_sh, .allocator = self.allocator, .refcount = self.refcount, .cow = self.cow, .mutex = self.mutex };
     }
 
-    pub fn relu(self: *Tensor) !void {
-        try ensureWritable(self);
-        var indices = try self.allocator.alloc(usize, self.shape.dims.len);
-        defer self.allocator.free(indices);
-        @memset(indices, 0);
-        const total = try self.shape.totalSize();
-        var flat: usize = 0;
-        while (flat < total) : (flat += 1) {
-            const idx = try self.computeIndex(indices);
-            self.data[idx] = @max(0.0, self.data[idx]);
-            var i: usize = self.shape.dims.len;
-            while (i > 0) : (i -= 1) {
-                indices[i - 1] += 1;
-                if (indices[i - 1] < self.shape.dims[i - 1]) break;
-                indices[i - 1] = 0;
-            }
-        }
-    }
-
-    pub fn softmax(self: *Tensor, axis: usize) !void {
-        if (axis >= self.shape.dims.len) return Error.InvalidAxis;
-        try self.ensureWritable();
-        var indices = try self.allocator.alloc(usize, self.shape.dims.len);
-        defer self.allocator.free(indices);
-        @memset(indices, 0);
-        var search_indices = try self.allocator.alloc(usize, self.shape.dims.len);
-        defer self.allocator.free(search_indices);
-        const total = try self.shape.totalSize();
-        var flat: usize = 0;
-        while (flat < total) : (flat += 1) {
-            if (indices[axis] == 0) {
-                var max_val: f32 = -math.inf(f32);
-                @memcpy(search_indices, indices);
-                var k: usize = 0;
-                while (k < self.shape.dims[axis]) : (k += 1) {
-                    search_indices[axis] = k;
-                    const val = try self.get(search_indices);
-                    if (val > max_val) max_val = val;
-                }
-                var sum_val: f32 = 0.0;
-                k = 0;
-                while (k < self.shape.dims[axis]) : (k += 1) {
-                    search_indices[axis] = k;
-                    const idx = try self.computeIndex(search_indices);
-                    const exp_val = @exp(self.data[idx] - max_val);
-                    self.data[idx] = exp_val;
-                    sum_val += exp_val;
-                }
-                const epsilon: f32 = 1e-10;
-                if (sum_val < epsilon) sum_val = epsilon;
-                k = 0;
-                while (k < self.shape.dims[axis]) : (k += 1) {
-                    search_indices[axis] = k;
-                    const idx = try self.computeIndex(search_indices);
-                    self.data[idx] /= sum_val;
-                }
-            }
-            var i: usize = self.shape.dims.len;
-            while (i > 0) : (i -= 1) {
-                indices[i - 1] += 1;
-                if (indices[i - 1] < self.shape.dims[i - 1]) break;
-                indices[i - 1] = 0;
-            }
-        }
-    }
-
     pub fn zeros(allocator: Allocator, shape: []const usize) !Tensor {
         return init(allocator, shape);
     }
@@ -1088,54 +1022,6 @@ pub const Tensor = struct {
             try t.set(&.{ i, i }, 1.0);
         }
         return t;
-    }
-
-    pub fn conv2d(self: *const Tensor, kernel: *const Tensor, allocator: Allocator, stride: [2]usize, padding: [2]usize) !Tensor {
-        if (self.shape.dims.len != 4 or kernel.shape.dims.len != 4 or self.shape.dims[3] != kernel.shape.dims[2]) return Error.InvalidConv2D;
-        const batch = self.shape.dims[0];
-        const in_h = self.shape.dims[1];
-        const in_w = self.shape.dims[2];
-        const in_c = self.shape.dims[3];
-        const k_h = kernel.shape.dims[0];
-        const k_w = kernel.shape.dims[1];
-        const out_c = kernel.shape.dims[3];
-        if (stride[0] == 0 or stride[1] == 0) return Error.InvalidConv2D;
-        if (k_h > in_h + 2 * padding[0] or k_w > in_w + 2 * padding[1]) return Error.InvalidConv2D;
-        const out_h = ((in_h + 2 * padding[0] - k_h) / stride[0]) + 1;
-        const out_w = ((in_w + 2 * padding[1] - k_w) / stride[1]) + 1;
-        if (out_h == 0 or out_w == 0 or batch == 0 or out_c == 0) return Error.InvalidConv2D;
-        var output = try init(allocator, &.{ batch, out_h, out_w, out_c });
-        var b: usize = 0;
-        while (b < batch) : (b += 1) {
-            var oh: usize = 0;
-            while (oh < out_h) : (oh += 1) {
-                var ow: usize = 0;
-                while (ow < out_w) : (ow += 1) {
-                    var oc: usize = 0;
-                    while (oc < out_c) : (oc += 1) {
-                        var sum_result: f32 = 0.0;
-                        var kh: usize = 0;
-                        while (kh < k_h) : (kh += 1) {
-                            var kw: usize = 0;
-                            while (kw < k_w) : (kw += 1) {
-                                var ic: usize = 0;
-                                while (ic < in_c) : (ic += 1) {
-                                    const ih = oh * stride[0] + kh;
-                                    const iw = ow * stride[1] + kw;
-                                    if (ih >= padding[0] and iw >= padding[1] and ih - padding[0] < in_h and iw - padding[1] < in_w) {
-                                        const realH = ih - padding[0];
-                                        const realW = iw - padding[1];
-                                        sum_result += try self.get(&.{ b, realH, realW, ic }) * try kernel.get(&.{ kh, kw, ic, oc });
-                                    }
-                                }
-                            }
-                        }
-                        try output.set(&.{ b, oh, ow, oc }, sum_result);
-                    }
-                }
-            }
-        }
-        return output;
     }
 
     pub fn pad(self: *const Tensor, allocator: Allocator, pads: [][2]usize) !Tensor {

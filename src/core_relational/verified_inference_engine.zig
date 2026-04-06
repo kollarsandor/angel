@@ -227,37 +227,38 @@ pub const VerifiedInferenceEngine = struct {
             obf.ProofOfCorrectness.OperationType.MatrixMultiply,
         );
 
-        var intermediate_2 = try self.allocator.alloc(f32, output_buf.len);
-        defer self.allocator.free(intermediate_2);
-
-        i = 0;
-        while (i < intermediate_2.len) : (i += 1) {
-            intermediate_2[i] = std.math.tanh(intermediate_1[i]);
+        const half = intermediate_1.len / 2;
+        if (half > 0) {
+            var j: usize = 0;
+            while (j < half) : (j += 1) {
+                const raw = intermediate_1[j + half];
+                const clipped = if (raw < -5.0) @as(f32, -5.0) else if (raw > 5.0) @as(f32, 5.0) else raw;
+                const scale = @exp(clipped);
+                intermediate_1[j] *= scale;
+            }
+            j = 0;
+            while (j < half) : (j += 1) {
+                intermediate_1[j + half] += intermediate_1[j] * 1.732;
+            }
         }
 
         try self.proof_of_correctness.recordStep(
             2,
+            input,
             intermediate_1,
-            intermediate_2,
-            obf.ProofOfCorrectness.OperationType.Activation,
+            obf.ProofOfCorrectness.OperationType.AffineCoupling,
         );
-
-        var sum: f64 = 0.0;
-        for (intermediate_2) |val| {
-            sum += @as(f64, val);
-        }
-        const mean: f32 = @floatCast(sum / @as(f64, @floatFromInt(intermediate_2.len)));
 
         i = 0;
         while (i < output_buf.len) : (i += 1) {
-            output_buf[i] = intermediate_2[i] - mean;
+            output_buf[i] = intermediate_1[i];
         }
 
         try self.proof_of_correctness.recordStep(
             3,
-            intermediate_2,
+            intermediate_1,
             output_buf,
-            obf.ProofOfCorrectness.OperationType.Normalization,
+            obf.ProofOfCorrectness.OperationType.ScatterPermute,
         );
 
         for (output_buf) |*val| {
@@ -322,33 +323,34 @@ pub const VerifiedInferenceEngine = struct {
 
         var layer: usize = 0;
         while (layer < weights_s.len) : (layer += 1) {
-            var next_intermediate = try self.allocator.alloc(f32, output_buf.len);
+            const half = output_buf.len / 2;
+            if (half == 0) break;
 
             var out_idx: usize = 0;
-            while (out_idx < output_buf.len) : (out_idx += 1) {
-                var sum: f32 = 0.0;
+            while (out_idx < half) : (out_idx += 1) {
+                var s: f32 = 0.0;
                 var in_idx: usize = 0;
-                while (in_idx < intermediate.len and in_idx < weights_s[layer].len) : (in_idx += 1) {
+                while (in_idx < half and in_idx < weights_s[layer].len) : (in_idx += 1) {
                     if (out_idx < weights_s[layer][in_idx].len) {
-                        sum += intermediate[in_idx] * weights_s[layer][in_idx][out_idx];
+                        s += intermediate[in_idx + half] * weights_s[layer][in_idx][out_idx];
                     }
                 }
-                next_intermediate[out_idx] = std.math.tanh(sum);
+                const clipped = if (s < -5.0) @as(f32, -5.0) else if (s > 5.0) @as(f32, 5.0) else s;
+                const scale = @exp(clipped);
+                intermediate[out_idx] *= scale;
             }
 
             out_idx = 0;
-            while (out_idx < output_buf.len) : (out_idx += 1) {
-                var sum: f32 = 0.0;
+            while (out_idx < half) : (out_idx += 1) {
+                var t: f32 = 0.0;
                 var in_idx: usize = 0;
-                while (in_idx < next_intermediate.len and in_idx < weights_t[layer].len) : (in_idx += 1) {
+                while (in_idx < half and in_idx < weights_t[layer].len) : (in_idx += 1) {
                     if (out_idx < weights_t[layer][in_idx].len) {
-                        sum += next_intermediate[in_idx] * weights_t[layer][in_idx][out_idx];
+                        t += intermediate[in_idx] * weights_t[layer][in_idx][out_idx];
                     }
                 }
-                intermediate[out_idx] = intermediate[out_idx] + sum;
+                intermediate[out_idx + half] += t;
             }
-
-            self.allocator.free(next_intermediate);
         }
 
         i = 0;
