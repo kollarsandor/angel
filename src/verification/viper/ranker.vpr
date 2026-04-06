@@ -1,0 +1,3119 @@
+domain FixedPoint {
+    function fp_scale(): Int
+    function fp_from_int(i: Int): Int
+    function fp_add(a: Int, b: Int): Int
+    function fp_sub(a: Int, b: Int): Int
+    function fp_mul(a: Int, b: Int): Int
+    function fp_div(a: Int, b: Int): Int
+    function fp_sqrt(a: Int): Int
+    function fp_clamp(val: Int, lo: Int, hi: Int): Int
+    function fp_min(a: Int, b: Int): Int
+    function fp_max(a: Int, b: Int): Int
+    function fp_abs(a: Int): Int
+    function fp_zero(): Int
+    function fp_one(): Int
+    function fp_half(): Int
+    function fp_neg_one(): Int
+    function fp_hundred(): Int
+    function fp_point_three(): Int
+    function fp_point_four(): Int
+    function fp_point_zero_one(): Int
+    function fp_is_nan(a: Int): Bool
+    function fp_is_inf(a: Int): Bool
+    function fp_is_valid(a: Int): Bool
+    function fp_nan_sentinel(): Int
+    function fp_inf_sentinel(): Int
+
+    axiom ax_scale {
+        fp_scale() == 1000000
+    }
+
+    axiom ax_zero {
+        fp_zero() == 0
+    }
+
+    axiom ax_one {
+        fp_one() == fp_scale()
+    }
+
+    axiom ax_half {
+        fp_half() == fp_scale() / 2
+    }
+
+    axiom ax_neg_one {
+        fp_neg_one() == -fp_scale()
+    }
+
+    axiom ax_hundred {
+        fp_hundred() == 100 * fp_scale()
+    }
+
+    axiom ax_point_three {
+        fp_point_three() == fp_scale() * 3 / 10
+    }
+
+    axiom ax_point_four {
+        fp_point_four() == fp_scale() * 4 / 10
+    }
+
+    axiom ax_point_zero_one {
+        fp_point_zero_one() == fp_scale() / 100
+    }
+
+    axiom ax_nan_sentinel {
+        fp_nan_sentinel() == 2147483647
+    }
+
+    axiom ax_inf_sentinel {
+        fp_inf_sentinel() == 2147483646
+    }
+
+    axiom ax_is_nan {
+        forall a: Int :: { fp_is_nan(a) }
+            fp_is_nan(a) <==> (a == fp_nan_sentinel())
+    }
+
+    axiom ax_is_inf {
+        forall a: Int :: { fp_is_inf(a) }
+            fp_is_inf(a) <==> (a == fp_inf_sentinel() || a == -fp_inf_sentinel())
+    }
+
+    axiom ax_is_valid {
+        forall a: Int :: { fp_is_valid(a) }
+            fp_is_valid(a) <==> (!fp_is_nan(a) && !fp_is_inf(a))
+    }
+
+    axiom ax_from_int {
+        forall i: Int :: { fp_from_int(i) }
+            fp_from_int(i) == i * fp_scale()
+    }
+
+    axiom ax_from_int_nonneg {
+        forall i: Int :: { fp_from_int(i) }
+            i >= 0 ==> fp_from_int(i) >= 0
+    }
+
+    axiom ax_add {
+        forall a: Int, b: Int :: { fp_add(a, b) }
+            (fp_is_valid(a) && fp_is_valid(b)) ==> fp_add(a, b) == a + b
+    }
+
+    axiom ax_add_nan_left {
+        forall a: Int, b: Int :: { fp_add(a, b) }
+            fp_is_nan(a) ==> fp_is_nan(fp_add(a, b))
+    }
+
+    axiom ax_add_nan_right {
+        forall a: Int, b: Int :: { fp_add(a, b) }
+            fp_is_nan(b) ==> fp_is_nan(fp_add(a, b))
+    }
+
+    axiom ax_sub {
+        forall a: Int, b: Int :: { fp_sub(a, b) }
+            (fp_is_valid(a) && fp_is_valid(b)) ==> fp_sub(a, b) == a - b
+    }
+
+    axiom ax_mul {
+        forall a: Int, b: Int :: { fp_mul(a, b) }
+            (fp_is_valid(a) && fp_is_valid(b)) ==> fp_mul(a, b) == (a * b) / fp_scale()
+    }
+
+    axiom ax_mul_comm {
+        forall a: Int, b: Int :: { fp_mul(a, b) }
+            fp_mul(a, b) == fp_mul(b, a)
+    }
+
+    axiom ax_div {
+        forall a: Int, b: Int :: { fp_div(a, b) }
+            (fp_is_valid(a) && fp_is_valid(b) && b != 0) ==> fp_div(a, b) == (a * fp_scale()) / b
+    }
+
+    axiom ax_div_by_zero {
+        forall a: Int :: { fp_div(a, fp_zero()) }
+            fp_is_nan(fp_div(a, fp_zero()))
+    }
+
+    axiom ax_sqrt_nonneg {
+        forall a: Int :: { fp_sqrt(a) }
+            (fp_is_valid(a) && a >= 0) ==> fp_sqrt(a) >= 0
+    }
+
+    axiom ax_sqrt_zero {
+        fp_sqrt(fp_zero()) == fp_zero()
+    }
+
+    axiom ax_sqrt_one {
+        fp_sqrt(fp_one()) == fp_one()
+    }
+
+    axiom ax_clamp_lower {
+        forall val: Int, lo: Int, hi: Int :: { fp_clamp(val, lo, hi) }
+            (fp_is_valid(val) && fp_is_valid(lo) && fp_is_valid(hi) && val < lo) ==> fp_clamp(val, lo, hi) == lo
+    }
+
+    axiom ax_clamp_upper {
+        forall val: Int, lo: Int, hi: Int :: { fp_clamp(val, lo, hi) }
+            (fp_is_valid(val) && fp_is_valid(lo) && fp_is_valid(hi) && val > hi) ==> fp_clamp(val, lo, hi) == hi
+    }
+
+    axiom ax_clamp_middle {
+        forall val: Int, lo: Int, hi: Int :: { fp_clamp(val, lo, hi) }
+            (fp_is_valid(val) && fp_is_valid(lo) && fp_is_valid(hi) && lo <= val && val <= hi) ==> fp_clamp(val, lo, hi) == val
+    }
+
+    axiom ax_clamp_bounds {
+        forall val: Int, lo: Int, hi: Int :: { fp_clamp(val, lo, hi) }
+            (fp_is_valid(lo) && fp_is_valid(hi) && lo <= hi) ==> (fp_clamp(val, lo, hi) >= lo && fp_clamp(val, lo, hi) <= hi)
+    }
+
+    axiom ax_min {
+        forall a: Int, b: Int :: { fp_min(a, b) }
+            (a <= b ==> fp_min(a, b) == a) && (a > b ==> fp_min(a, b) == b)
+    }
+
+    axiom ax_max {
+        forall a: Int, b: Int :: { fp_max(a, b) }
+            (a >= b ==> fp_max(a, b) == a) && (a < b ==> fp_max(a, b) == b)
+    }
+
+    axiom ax_abs_nonneg {
+        forall a: Int :: { fp_abs(a) }
+            fp_abs(a) >= 0
+    }
+
+    axiom ax_abs_pos {
+        forall a: Int :: { fp_abs(a) }
+            a >= 0 ==> fp_abs(a) == a
+    }
+
+    axiom ax_abs_neg {
+        forall a: Int :: { fp_abs(a) }
+            a < 0 ==> fp_abs(a) == -a
+    }
+
+    axiom ax_add_comm {
+        forall a: Int, b: Int :: { fp_add(a, b) }
+            fp_add(a, b) == fp_add(b, a)
+    }
+
+    axiom ax_add_zero {
+        forall a: Int :: { fp_add(a, fp_zero()) }
+            fp_is_valid(a) ==> fp_add(a, fp_zero()) == a
+    }
+
+    axiom ax_mul_zero {
+        forall a: Int :: { fp_mul(a, fp_zero()) }
+            fp_is_valid(a) ==> fp_mul(a, fp_zero()) == fp_zero()
+    }
+
+    axiom ax_mul_one {
+        forall a: Int :: { fp_mul(a, fp_one()) }
+            fp_is_valid(a) ==> fp_mul(a, fp_one()) == a
+    }
+}
+
+domain StableHash {
+    function stable_hash(data: Seq[Int], seed: Int): Int
+    function stable_hash_single(token_le: Seq[Int], seed: Int): Int
+    function hash_xor(a: Int, b: Int): Int
+    function hash_combine(a: Int, b: Int): Int
+
+    axiom ax_hash_deterministic {
+        forall data: Seq[Int], seed: Int :: { stable_hash(data, seed) }
+            stable_hash(data, seed) == stable_hash(data, seed)
+    }
+
+    axiom ax_hash_single_deterministic {
+        forall tok: Seq[Int], seed: Int :: { stable_hash_single(tok, seed) }
+            stable_hash_single(tok, seed) == stable_hash_single(tok, seed)
+    }
+
+    axiom ax_hash_xor_self {
+        forall a: Int :: { hash_xor(a, a) }
+            hash_xor(a, a) == 0
+    }
+
+    axiom ax_hash_xor_comm {
+        forall a: Int, b: Int :: { hash_xor(a, b) }
+            hash_xor(a, b) == hash_xor(b, a)
+    }
+
+    axiom ax_hash_xor_zero {
+        forall a: Int :: { hash_xor(a, 0) }
+            hash_xor(a, 0) == a
+    }
+
+    axiom ax_hash_nonneg {
+        forall data: Seq[Int], seed: Int :: { stable_hash(data, seed) }
+            stable_hash(data, seed) >= 0
+    }
+}
+
+domain BitOps {
+    function bitwise_and(a: Int, b: Int): Int
+    function bitwise_or(a: Int, b: Int): Int
+    function bitwise_xor(a: Int, b: Int): Int
+    function bitwise_not(a: Int): Int
+    function left_shift(a: Int, n: Int): Int
+    function right_shift(a: Int, n: Int): Int
+    function popcount(x: Int): Int
+
+    axiom ax_popcount_nonneg {
+        forall x: Int :: { popcount(x) }
+            popcount(x) >= 0
+    }
+
+    axiom ax_popcount_zero {
+        popcount(0) == 0
+    }
+
+    axiom ax_and_zero {
+        forall a: Int :: { bitwise_and(a, 0) }
+            bitwise_and(a, 0) == 0
+    }
+
+    axiom ax_or_zero {
+        forall a: Int :: { bitwise_or(a, 0) }
+            bitwise_or(a, 0) == a
+    }
+
+    axiom ax_and_self {
+        forall a: Int :: { bitwise_and(a, a) }
+            bitwise_and(a, a) == a
+    }
+
+    axiom ax_or_self {
+        forall a: Int :: { bitwise_or(a, a) }
+            bitwise_or(a, a) == a
+    }
+
+    axiom ax_and_comm {
+        forall a: Int, b: Int :: { bitwise_and(a, b) }
+            bitwise_and(a, b) == bitwise_and(b, a)
+    }
+
+    axiom ax_or_comm {
+        forall a: Int, b: Int :: { bitwise_or(a, b) }
+            bitwise_or(a, b) == bitwise_or(b, a)
+    }
+
+    axiom ax_popcount_and_leq {
+        forall a: Int, b: Int :: { popcount(bitwise_and(a, b)) }
+            popcount(bitwise_and(a, b)) <= popcount(a) && popcount(bitwise_and(a, b)) <= popcount(b)
+    }
+
+    axiom ax_popcount_or_geq {
+        forall a: Int, b: Int :: { popcount(bitwise_or(a, b)) }
+            popcount(bitwise_or(a, b)) >= popcount(a) && popcount(bitwise_or(a, b)) >= popcount(b)
+    }
+
+    axiom ax_popcount_or_leq_sum {
+        forall a: Int, b: Int :: { popcount(bitwise_or(a, b)) }
+            popcount(bitwise_or(a, b)) <= popcount(a) + popcount(b)
+    }
+}
+
+domain IntMath {
+    function int_min(a: Int, b: Int): Int
+    function int_max(a: Int, b: Int): Int
+    function int_abs(a: Int): Int
+    function int_clamp(val: Int, lo: Int, hi: Int): Int
+    function safe_mul(a: Int, b: Int): Int
+    function MAX_U64(): Int
+    function MAX_U32(): Int
+
+    axiom ax_max_u64 {
+        MAX_U64() == 18446744073709551615
+    }
+
+    axiom ax_max_u32 {
+        MAX_U32() == 4294967295
+    }
+
+    axiom ax_min_left {
+        forall a: Int, b: Int :: { int_min(a, b) }
+            int_min(a, b) <= a
+    }
+
+    axiom ax_min_right {
+        forall a: Int, b: Int :: { int_min(a, b) }
+            int_min(a, b) <= b
+    }
+
+    axiom ax_min_is_one {
+        forall a: Int, b: Int :: { int_min(a, b) }
+            int_min(a, b) == a || int_min(a, b) == b
+    }
+
+    axiom ax_min_leq {
+        forall a: Int, b: Int :: { int_min(a, b) }
+            (a <= b ==> int_min(a, b) == a) && (b < a ==> int_min(a, b) == b)
+    }
+
+    axiom ax_max_left {
+        forall a: Int, b: Int :: { int_max(a, b) }
+            int_max(a, b) >= a
+    }
+
+    axiom ax_max_right {
+        forall a: Int, b: Int :: { int_max(a, b) }
+            int_max(a, b) >= b
+    }
+
+    axiom ax_max_is_one {
+        forall a: Int, b: Int :: { int_max(a, b) }
+            int_max(a, b) == a || int_max(a, b) == b
+    }
+
+    axiom ax_max_geq {
+        forall a: Int, b: Int :: { int_max(a, b) }
+            (a >= b ==> int_max(a, b) == a) && (b > a ==> int_max(a, b) == b)
+    }
+
+    axiom ax_abs_nonneg {
+        forall a: Int :: { int_abs(a) }
+            int_abs(a) >= 0
+    }
+
+    axiom ax_abs_pos {
+        forall a: Int :: { int_abs(a) }
+            a >= 0 ==> int_abs(a) == a
+    }
+
+    axiom ax_abs_neg {
+        forall a: Int :: { int_abs(a) }
+            a < 0 ==> int_abs(a) == -a
+    }
+
+    axiom ax_clamp_bounds {
+        forall val: Int, lo: Int, hi: Int :: { int_clamp(val, lo, hi) }
+            lo <= hi ==> (int_clamp(val, lo, hi) >= lo && int_clamp(val, lo, hi) <= hi)
+    }
+
+    axiom ax_clamp_val {
+        forall val: Int, lo: Int, hi: Int :: { int_clamp(val, lo, hi) }
+            (lo <= hi && lo <= val && val <= hi) ==> int_clamp(val, lo, hi) == val
+    }
+
+    axiom ax_safe_mul_nonneg {
+        forall a: Int, b: Int :: { safe_mul(a, b) }
+            (a >= 0 && b >= 0) ==> safe_mul(a, b) >= 0
+    }
+
+    axiom ax_safe_mul_val {
+        forall a: Int, b: Int :: { safe_mul(a, b) }
+            (a >= 0 && b >= 0 && a * b <= MAX_U64()) ==> safe_mul(a, b) == a * b
+    }
+
+    axiom ax_safe_mul_overflow {
+        forall a: Int, b: Int :: { safe_mul(a, b) }
+            (a >= 0 && b >= 0 && a * b > MAX_U64()) ==> safe_mul(a, b) == MAX_U64()
+    }
+}
+
+domain SeqOps {
+    function seq_unique_count(s: Seq[Int]): Int
+    function seq_contains(s: Seq[Int], v: Int): Bool
+    function seq_overlap_count(a: Seq[Int], b: Seq[Int]): Int
+    function seq_union_size(a: Seq[Int], b: Seq[Int]): Int
+    function seq_intersection_size(a: Seq[Int], b: Seq[Int]): Int
+    function seq_to_set(s: Seq[Int]): Set[Int]
+
+    axiom ax_unique_nonneg {
+        forall s: Seq[Int] :: { seq_unique_count(s) }
+            seq_unique_count(s) >= 0
+    }
+
+    axiom ax_unique_leq_len {
+        forall s: Seq[Int] :: { seq_unique_count(s) }
+            seq_unique_count(s) <= |s|
+    }
+
+    axiom ax_unique_empty {
+        seq_unique_count(Seq[Int]()) == 0
+    }
+
+    axiom ax_unique_positive {
+        forall s: Seq[Int] :: { seq_unique_count(s) }
+            |s| > 0 ==> seq_unique_count(s) > 0
+    }
+
+    axiom ax_overlap_nonneg {
+        forall a: Seq[Int], b: Seq[Int] :: { seq_overlap_count(a, b) }
+            seq_overlap_count(a, b) >= 0
+    }
+
+    axiom ax_overlap_leq_a {
+        forall a: Seq[Int], b: Seq[Int] :: { seq_overlap_count(a, b) }
+            seq_overlap_count(a, b) <= |a|
+    }
+
+    axiom ax_overlap_leq_b {
+        forall a: Seq[Int], b: Seq[Int] :: { seq_overlap_count(a, b) }
+            seq_overlap_count(a, b) <= |b|
+    }
+
+    axiom ax_intersection_leq_union {
+        forall a: Seq[Int], b: Seq[Int] :: { seq_intersection_size(a, b), seq_union_size(a, b) }
+            seq_intersection_size(a, b) <= seq_union_size(a, b)
+    }
+
+    axiom ax_union_nonneg {
+        forall a: Seq[Int], b: Seq[Int] :: { seq_union_size(a, b) }
+            seq_union_size(a, b) >= 0
+    }
+
+    axiom ax_intersection_nonneg {
+        forall a: Seq[Int], b: Seq[Int] :: { seq_intersection_size(a, b) }
+            seq_intersection_size(a, b) >= 0
+    }
+
+    axiom ax_to_set_contains {
+        forall s: Seq[Int], i: Int :: { (s[i]) in seq_to_set(s) }
+            (0 <= i && i < |s|) ==> (s[i]) in seq_to_set(s)
+    }
+
+    axiom ax_to_set_size {
+        forall s: Seq[Int] :: { |seq_to_set(s)| }
+            |seq_to_set(s)| == seq_unique_count(s)
+    }
+}
+
+domain TokenLE {
+    function token_to_le_bytes(token: Int): Seq[Int]
+    function tokens_to_le_bytes(tokens: Seq[Int]): Seq[Int]
+
+    axiom ax_token_le_len {
+        forall t: Int :: { token_to_le_bytes(t) }
+            |token_to_le_bytes(t)| == 4
+    }
+
+    axiom ax_tokens_le_len {
+        forall ts: Seq[Int] :: { tokens_to_le_bytes(ts) }
+            |tokens_to_le_bytes(ts)| == |ts| * 4
+    }
+
+    axiom ax_token_le_deterministic {
+        forall t: Int :: { token_to_le_bytes(t) }
+            token_to_le_bytes(t) == token_to_le_bytes(t)
+    }
+
+    axiom ax_tokens_le_deterministic {
+        forall ts: Seq[Int] :: { tokens_to_le_bytes(ts) }
+            tokens_to_le_bytes(ts) == tokens_to_le_bytes(ts)
+    }
+}
+
+field ngram_weights: Seq[Int]
+field ngram_weights_len: Int
+field lsh_hash_params: Seq[Int]
+field lsh_hash_params_len: Int
+field num_hash_functions: Int
+field num_ngrams: Int
+field ranker_seed: Int
+
+field seg_tokens: Seq[Int]
+field seg_tokens_len: Int
+field seg_score: Int
+field seg_position: Int
+field seg_anchor: Bool
+
+field bitset_words: Seq[Int]
+field bitset_words_len: Int
+field bitset_capacity: Int
+
+field tensor_data: Seq[Int]
+field tensor_data_len: Int
+field tensor_shape: Seq[Int]
+field tensor_rank: Int
+
+field ssi_entries: Map[Int, Ref]
+field ssi_size: Int
+field ssi_entry_score: Int
+field ssi_entry_position: Int
+field ssi_entry_anchor: Bool
+field ssi_entry_anchor_hash: Int
+
+predicate valid_ranker(r: Ref) {
+    acc(r.ngram_weights) &&
+    acc(r.ngram_weights_len) &&
+    acc(r.lsh_hash_params) &&
+    acc(r.lsh_hash_params_len) &&
+    acc(r.num_hash_functions) &&
+    acc(r.num_ngrams) &&
+    acc(r.ranker_seed) &&
+    r.num_ngrams > 0 &&
+    r.num_hash_functions > 0 &&
+    r.ngram_weights_len == r.num_ngrams &&
+    |r.ngram_weights| == r.num_ngrams &&
+    r.lsh_hash_params_len == r.num_hash_functions * 2 &&
+    |r.lsh_hash_params| == r.num_hash_functions * 2 &&
+    (forall i: Int :: { r.ngram_weights[i] }
+        0 <= i && i < r.num_ngrams ==>
+            fp_is_valid(r.ngram_weights[i]) &&
+            r.ngram_weights[i] >= fp_zero() &&
+            r.ngram_weights[i] <= fp_one())
+}
+
+predicate valid_ranker_ro(r: Ref) {
+    acc(r.ngram_weights, 1/2) &&
+    acc(r.ngram_weights_len, 1/2) &&
+    acc(r.lsh_hash_params, 1/2) &&
+    acc(r.lsh_hash_params_len, 1/2) &&
+    acc(r.num_hash_functions, 1/2) &&
+    acc(r.num_ngrams, 1/2) &&
+    acc(r.ranker_seed, 1/2) &&
+    r.num_ngrams > 0 &&
+    r.num_hash_functions > 0 &&
+    r.ngram_weights_len == r.num_ngrams &&
+    |r.ngram_weights| == r.num_ngrams &&
+    r.lsh_hash_params_len == r.num_hash_functions * 2 &&
+    |r.lsh_hash_params| == r.num_hash_functions * 2 &&
+    (forall i: Int :: { r.ngram_weights[i] }
+        0 <= i && i < r.num_ngrams ==>
+            fp_is_valid(r.ngram_weights[i]) &&
+            r.ngram_weights[i] >= fp_zero() &&
+            r.ngram_weights[i] <= fp_one())
+}
+
+predicate valid_ssi_entry(e: Ref) {
+    acc(e.ssi_entry_score) &&
+    acc(e.ssi_entry_position) &&
+    acc(e.ssi_entry_anchor) &&
+    acc(e.ssi_entry_anchor_hash) &&
+    fp_is_valid(e.ssi_entry_score) &&
+    e.ssi_entry_position >= 0
+}
+
+predicate valid_ssi_entry_ro(e: Ref) {
+    acc(e.ssi_entry_score, 1/2) &&
+    acc(e.ssi_entry_position, 1/2) &&
+    acc(e.ssi_entry_anchor, 1/2) &&
+    acc(e.ssi_entry_anchor_hash, 1/2) &&
+    fp_is_valid(e.ssi_entry_score) &&
+    e.ssi_entry_position >= 0
+}
+
+predicate valid_ssi(s: Ref) {
+    acc(s.ssi_entries) &&
+    acc(s.ssi_size) &&
+    s.ssi_size >= 0
+}
+
+predicate valid_ssi_ro(s: Ref) {
+    acc(s.ssi_entries, 1/2) &&
+    acc(s.ssi_size, 1/2) &&
+    s.ssi_size >= 0
+}
+
+predicate valid_ranked_segment(rs: Ref) {
+    acc(rs.seg_tokens) &&
+    acc(rs.seg_tokens_len) &&
+    acc(rs.seg_score) &&
+    acc(rs.seg_position) &&
+    acc(rs.seg_anchor) &&
+    rs.seg_tokens_len >= 0 &&
+    |rs.seg_tokens| == rs.seg_tokens_len &&
+    fp_is_valid(rs.seg_score) &&
+    rs.seg_position >= 0
+}
+
+predicate valid_ranked_segment_ro(rs: Ref) {
+    acc(rs.seg_tokens, 1/2) &&
+    acc(rs.seg_tokens_len, 1/2) &&
+    acc(rs.seg_score, 1/2) &&
+    acc(rs.seg_position, 1/2) &&
+    acc(rs.seg_anchor, 1/2) &&
+    rs.seg_tokens_len >= 0 &&
+    |rs.seg_tokens| == rs.seg_tokens_len &&
+    fp_is_valid(rs.seg_score) &&
+    rs.seg_position >= 0
+}
+
+predicate valid_bitset(b: Ref) {
+    acc(b.bitset_words) &&
+    acc(b.bitset_words_len) &&
+    acc(b.bitset_capacity) &&
+    b.bitset_words_len >= 0 &&
+    b.bitset_capacity >= 0 &&
+    |b.bitset_words| == b.bitset_words_len
+}
+
+predicate valid_bitset_ro(b: Ref) {
+    acc(b.bitset_words, 1/2) &&
+    acc(b.bitset_words_len, 1/2) &&
+    acc(b.bitset_capacity, 1/2) &&
+    b.bitset_words_len >= 0 &&
+    b.bitset_capacity >= 0 &&
+    |b.bitset_words| == b.bitset_words_len
+}
+
+predicate valid_tensor(t: Ref) {
+    acc(t.tensor_data) &&
+    acc(t.tensor_data_len) &&
+    acc(t.tensor_shape) &&
+    acc(t.tensor_rank) &&
+    t.tensor_data_len >= 0 &&
+    |t.tensor_data| == t.tensor_data_len &&
+    t.tensor_rank >= 0 &&
+    |t.tensor_shape| == t.tensor_rank &&
+    (forall i: Int :: { t.tensor_data[i] }
+        0 <= i && i < t.tensor_data_len ==> fp_is_valid(t.tensor_data[i]))
+}
+
+predicate valid_tensor_ro(t: Ref) {
+    acc(t.tensor_data, 1/2) &&
+    acc(t.tensor_data_len, 1/2) &&
+    acc(t.tensor_shape, 1/2) &&
+    acc(t.tensor_rank, 1/2) &&
+    t.tensor_data_len >= 0 &&
+    |t.tensor_data| == t.tensor_data_len &&
+    t.tensor_rank >= 0 &&
+    |t.tensor_shape| == t.tensor_rank &&
+    (forall i: Int :: { t.tensor_data[i] }
+        0 <= i && i < t.tensor_data_len ==> fp_is_valid(t.tensor_data[i]))
+}
+
+predicate valid_candidate_list(cands: Seq[Ref], n: Int) {
+    n >= 0 &&
+    |cands| == n &&
+    (forall i: Int :: { cands[i] }
+        0 <= i && i < n ==> valid_ranked_segment(cands[i])) &&
+    (forall i: Int, j: Int :: { cands[i], cands[j] }
+        0 <= i && i < j && j < n ==> cands[i] != cands[j])
+}
+
+function STREAMING_BUFFER_SIZE(): Int { 1024 }
+function STREAMING_WINDOW_SIZE(): Int { 512 }
+function DEFAULT_TOP_K_RETRIEVAL(): Int { 1000 }
+function LEARNING_RATE(): Int { fp_point_zero_one() }
+function DIVERSITY_WEIGHT(): Int { fp_point_three() }
+function PROXIMITY_WEIGHT(): Int { fp_point_three() }
+function MAX_RAW_SCORE(): Int { fp_hundred() }
+function BASE_SCORE_WEIGHT(): Int { fp_point_four() }
+function OVERLAP_WEIGHT(): Int { fp_point_three() }
+function JACCARD_WEIGHT(): Int { fp_point_three() }
+
+function ngram_hash(tokens: Seq[Int], start: Int, gram: Int, seed: Int): Int
+    requires 0 <= start
+    requires gram > 0
+    requires start + gram <= |tokens|
+{
+    stable_hash(tokens_to_le_bytes(tokens[start..start+gram]), seed)
+}
+
+function token_hash(token: Int, seed: Int): Int
+{
+    stable_hash(token_to_le_bytes(token), seed)
+}
+
+function score_is_normalized(score: Int): Bool
+{
+    fp_is_valid(score) && score >= fp_zero() && score <= fp_one()
+}
+
+function score_is_cosine(score: Int): Bool
+{
+    fp_is_valid(score) && score >= fp_neg_one() && score <= fp_one()
+}
+
+method ranker_init(num_ngrams: Int, num_hash_funcs: Int, seed: Int) returns (r: Ref)
+    requires num_ngrams > 0
+    requires num_hash_funcs > 0
+    ensures valid_ranker(r)
+    ensures unfolding valid_ranker(r) in r.num_ngrams == num_ngrams
+    ensures unfolding valid_ranker(r) in r.num_hash_functions == num_hash_funcs
+    ensures unfolding valid_ranker(r) in r.ranker_seed == seed
+    ensures unfolding valid_ranker(r) in r.ngram_weights_len == num_ngrams
+    ensures unfolding valid_ranker(r) in |r.ngram_weights| == num_ngrams
+    ensures unfolding valid_ranker(r) in r.lsh_hash_params_len == num_hash_funcs * 2
+    ensures unfolding valid_ranker(r) in |r.lsh_hash_params| == num_hash_funcs * 2
+{
+    r := new(ngram_weights, ngram_weights_len, lsh_hash_params, lsh_hash_params_len, num_hash_functions, num_ngrams, ranker_seed)
+
+    var weights: Seq[Int] := Seq[Int]()
+    var wi: Int := 0
+    while (wi < num_ngrams)
+        invariant 0 <= wi && wi <= num_ngrams
+        invariant |weights| == wi
+        invariant forall j: Int :: { weights[j] }
+            0 <= j && j < wi ==>
+                fp_is_valid(weights[j]) &&
+                weights[j] >= fp_zero() &&
+                weights[j] <= fp_one()
+        invariant acc(r.ngram_weights)
+        invariant acc(r.ngram_weights_len)
+        invariant acc(r.lsh_hash_params)
+        invariant acc(r.lsh_hash_params_len)
+        invariant acc(r.num_hash_functions)
+        invariant acc(r.num_ngrams)
+        invariant acc(r.ranker_seed)
+    {
+        var decay: Int := fp_div(fp_one(), fp_from_int(wi + 1))
+        var clamped_decay: Int := fp_clamp(decay, fp_zero(), fp_one())
+        weights := weights ++ Seq(clamped_decay)
+        wi := wi + 1
+    }
+
+    var params: Seq[Int] := Seq[Int]()
+    var pi: Int := 0
+    while (pi < num_hash_funcs)
+        invariant 0 <= pi && pi <= num_hash_funcs
+        invariant |params| == pi * 2
+        invariant acc(r.ngram_weights)
+        invariant acc(r.ngram_weights_len)
+        invariant acc(r.lsh_hash_params)
+        invariant acc(r.lsh_hash_params_len)
+        invariant acc(r.num_hash_functions)
+        invariant acc(r.num_ngrams)
+        invariant acc(r.ranker_seed)
+    {
+        var val_a: Int := hash_combine(seed, pi)
+        var val_b: Int := hash_combine(seed, pi + 1)
+        params := params ++ Seq(val_a) ++ Seq(val_b)
+        pi := pi + 1
+    }
+
+    r.ngram_weights := weights
+    r.ngram_weights_len := num_ngrams
+    r.lsh_hash_params := params
+    r.lsh_hash_params_len := num_hash_funcs * 2
+    r.num_hash_functions := num_hash_funcs
+    r.num_ngrams := num_ngrams
+    r.ranker_seed := seed
+
+    fold valid_ranker(r)
+}
+
+method ranker_deinit(r: Ref)
+    requires valid_ranker(r)
+{
+    unfold valid_ranker(r)
+}
+
+method score_sequence(r: Ref, tokens: Seq[Int], ssi: Ref) returns (result: Int)
+    requires valid_ranker_ro(r)
+    requires valid_ssi_ro(ssi)
+    ensures valid_ranker_ro(r)
+    ensures valid_ssi_ro(ssi)
+    ensures score_is_normalized(result)
+{
+    unfold valid_ranker_ro(r)
+    unfold valid_ssi_ro(ssi)
+
+    var tokens_len: Int := |tokens|
+    if (tokens_len == 0) {
+        fold valid_ranker_ro(r)
+        fold valid_ssi_ro(ssi)
+        result := fp_zero()
+        return
+    }
+
+    var ngram_score: Int := fp_zero()
+    var num_ng: Int := r.num_ngrams
+    var wts: Seq[Int] := r.ngram_weights
+    var sd: Int := r.ranker_seed
+    var entries: Map[Int, Ref] := ssi.ssi_entries
+
+    var gram: Int := 1
+    var upper: Int := int_min(num_ng, tokens_len) + 1
+    while (gram < upper)
+        invariant 1 <= gram && gram <= upper
+        invariant upper == int_min(num_ng, tokens_len) + 1
+        invariant fp_is_valid(ngram_score)
+        invariant acc(r.ngram_weights, 1/4)
+        invariant acc(r.ngram_weights_len, 1/4)
+        invariant acc(r.lsh_hash_params, 1/4)
+        invariant acc(r.lsh_hash_params_len, 1/4)
+        invariant acc(r.num_hash_functions, 1/4)
+        invariant acc(r.num_ngrams, 1/4)
+        invariant acc(r.ranker_seed, 1/4)
+        invariant acc(ssi.ssi_entries, 1/4)
+        invariant acc(ssi.ssi_size, 1/4)
+        invariant wts == r.ngram_weights
+        invariant sd == r.ranker_seed
+        invariant entries == ssi.ssi_entries
+        invariant num_ng == r.num_ngrams
+        invariant |wts| == num_ng
+    {
+        var start: Int := 0
+        var end_bound: Int := tokens_len - gram + 1
+        while (start < end_bound)
+            invariant 0 <= start && start <= end_bound
+            invariant end_bound == tokens_len - gram + 1
+            invariant fp_is_valid(ngram_score)
+            invariant acc(r.ngram_weights, 1/4)
+            invariant acc(r.ngram_weights_len, 1/4)
+            invariant acc(r.lsh_hash_params, 1/4)
+            invariant acc(r.lsh_hash_params_len, 1/4)
+            invariant acc(r.num_hash_functions, 1/4)
+            invariant acc(r.num_ngrams, 1/4)
+            invariant acc(r.ranker_seed, 1/4)
+            invariant acc(ssi.ssi_entries, 1/4)
+            invariant acc(ssi.ssi_size, 1/4)
+            invariant wts == r.ngram_weights
+            invariant entries == ssi.ssi_entries
+            invariant |wts| == num_ng
+            invariant num_ng == r.num_ngrams
+        {
+            var h: Int := ngram_hash(tokens, start, gram, sd)
+            if (h in domain(entries)) {
+                var seg_ref: Ref := entries[h]
+                var seg_scr: Int := get_ssi_entry_score(seg_ref)
+                if (fp_is_valid(seg_scr)) {
+                    var widx: Int := int_min(gram - 1, num_ng - 1)
+                    var w: Int := wts[widx]
+                    var contrib: Int := fp_mul(w, seg_scr)
+                    if (fp_is_valid(contrib)) {
+                        ngram_score := fp_add(ngram_score, contrib)
+                        if (!fp_is_valid(ngram_score)) {
+                            ngram_score := fp_zero()
+                        }
+                    }
+                }
+            }
+            start := start + 1
+        }
+        gram := gram + 1
+    }
+
+    var diversity: Int := compute_token_diversity_pure(tokens)
+    var proximity: Int := compute_anchor_proximity(tokens, entries, sd)
+
+    var div_contrib: Int := fp_mul(DIVERSITY_WEIGHT(), diversity)
+    var prox_contrib: Int := fp_mul(PROXIMITY_WEIGHT(), proximity)
+    var sum1: Int := fp_add(ngram_score, div_contrib)
+    var raw: Int := fp_add(sum1, prox_contrib)
+
+    if (!fp_is_valid(raw)) {
+        raw := fp_zero()
+    }
+
+    raw := fp_clamp(raw, fp_zero(), MAX_RAW_SCORE())
+    result := fp_div(raw, MAX_RAW_SCORE())
+
+    if (!fp_is_valid(result)) {
+        result := fp_zero()
+    }
+
+    result := fp_clamp(result, fp_zero(), fp_one())
+
+    fold valid_ranker_ro(r)
+    fold valid_ssi_ro(ssi)
+}
+
+function get_ssi_entry_score(e: Ref): Int
+    requires acc(e.ssi_entry_score, wildcard)
+{
+    e.ssi_entry_score
+}
+
+function get_ssi_entry_position(e: Ref): Int
+    requires acc(e.ssi_entry_position, wildcard)
+{
+    e.ssi_entry_position
+}
+
+function get_ssi_entry_anchor(e: Ref): Bool
+    requires acc(e.ssi_entry_anchor, wildcard)
+{
+    e.ssi_entry_anchor
+}
+
+function compute_token_diversity_pure(tokens: Seq[Int]): Int
+    ensures fp_is_valid(result)
+    ensures result >= fp_zero()
+    ensures result <= fp_one()
+{
+    |tokens| == 0 ?
+        fp_zero() :
+        fp_clamp(
+            fp_div(fp_from_int(seq_unique_count(tokens)), fp_from_int(|tokens|)),
+            fp_zero(),
+            fp_one()
+        )
+}
+
+function compute_token_overlap_pure(tokens: Seq[Int], query: Seq[Int]): Int
+    ensures fp_is_valid(result)
+    ensures result >= fp_zero()
+    ensures result <= fp_one()
+{
+    (|tokens| == 0 || |query| == 0) ?
+        fp_zero() :
+        fp_clamp(
+            fp_div(
+                fp_from_int(seq_overlap_count(tokens, query)),
+                fp_from_int(int_max(|tokens|, |query|))
+            ),
+            fp_zero(),
+            fp_one()
+        )
+}
+
+function compute_jaccard_pure(tokens: Seq[Int], query: Seq[Int]): Int
+    ensures fp_is_valid(result)
+    ensures result >= fp_zero()
+    ensures result <= fp_one()
+{
+    (|tokens| == 0 && |query| == 0) ?
+        fp_one() :
+        (|tokens| == 0 || |query| == 0) ?
+            fp_zero() :
+            (seq_union_size(tokens, query) == 0 ?
+                fp_zero() :
+                fp_clamp(
+                    fp_div(
+                        fp_from_int(seq_intersection_size(tokens, query)),
+                        fp_from_int(seq_union_size(tokens, query))
+                    ),
+                    fp_zero(),
+                    fp_one()
+                ))
+}
+
+function compute_anchor_proximity(tokens: Seq[Int], entries: Map[Int, Ref], seed: Int): Int
+    ensures fp_is_valid(result)
+    ensures result >= fp_zero()
+    ensures result <= fp_one()
+{
+    |tokens| == 0 ? fp_zero() : fp_clamp(compute_anchor_proximity_raw(tokens, entries, seed, 0, |tokens|, fp_zero(), 0), fp_zero(), fp_one())
+}
+
+function compute_anchor_proximity_raw(tokens: Seq[Int], entries: Map[Int, Ref], seed: Int, idx: Int, len: Int, total_dist: Int, anchors: Int): Int
+    requires 0 <= idx && idx <= len
+    requires len == |tokens|
+    requires fp_is_valid(total_dist)
+    requires total_dist >= fp_zero()
+    requires anchors >= 0
+    ensures fp_is_valid(result)
+    ensures result >= fp_zero()
+    ensures result <= fp_one()
+    decreases len - idx
+{
+    idx == len ?
+        (anchors == 0 ?
+            fp_zero() :
+            fp_sub(fp_one(), fp_clamp(fp_div(total_dist, fp_from_int(int_max(anchors * len, 1))), fp_zero(), fp_one()))) :
+        (token_hash(tokens[idx], seed) in domain(entries) ?
+            compute_anchor_proximity_raw(
+                tokens, entries, seed, idx + 1, len,
+                fp_add(total_dist, fp_from_int(int_abs(idx - 0))),
+                anchors + 1
+            ) :
+            compute_anchor_proximity_raw(tokens, entries, seed, idx + 1, len, total_dist, anchors))
+}
+
+method score_sequence_with_query(r: Ref, tokens: Seq[Int], query: Seq[Int], ssi: Ref) returns (result: Int)
+    requires valid_ranker_ro(r)
+    requires valid_ssi_ro(ssi)
+    ensures valid_ranker_ro(r)
+    ensures valid_ssi_ro(ssi)
+    ensures score_is_normalized(result)
+{
+    var base: Int := score_sequence(r, tokens, ssi)
+
+    var overlap: Int := compute_token_overlap_pure(tokens, query)
+    var jaccard: Int := compute_jaccard_pure(tokens, query)
+
+    var t1: Int := fp_mul(base, BASE_SCORE_WEIGHT())
+    var t2: Int := fp_mul(overlap, OVERLAP_WEIGHT())
+    var t3: Int := fp_mul(jaccard, JACCARD_WEIGHT())
+
+    var combined: Int := fp_add(t1, fp_add(t2, t3))
+
+    if (!fp_is_valid(combined)) {
+        combined := fp_zero()
+    }
+
+    result := fp_clamp(combined, fp_zero(), fp_one())
+}
+
+method normalize_scores_static(scores: Seq[Int]) returns (result: Seq[Int])
+    requires |scores| >= 0
+    ensures |result| == |scores|
+    ensures forall i: Int :: { result[i] }
+        0 <= i && i < |result| ==> fp_is_valid(result[i])
+{
+    var n: Int := |scores|
+    if (n == 0) {
+        result := scores
+        return
+    }
+
+    var min_s: Int := fp_inf_sentinel()
+    var max_s: Int := -fp_inf_sentinel()
+    var valid_count: Int := 0
+    var si: Int := 0
+
+    while (si < n)
+        invariant 0 <= si && si <= n
+        invariant valid_count >= 0 && valid_count <= si
+        invariant valid_count > 0 ==> (fp_is_valid(min_s) && fp_is_valid(max_s) && min_s <= max_s)
+        invariant valid_count == 0 ==> (min_s == fp_inf_sentinel() && max_s == -fp_inf_sentinel())
+    {
+        var s: Int := scores[si]
+        if (fp_is_valid(s)) {
+            if (valid_count == 0) {
+                min_s := s
+                max_s := s
+            } else {
+                if (s < min_s) {
+                    min_s := s
+                }
+                if (s > max_s) {
+                    max_s := s
+                }
+            }
+            valid_count := valid_count + 1
+        }
+        si := si + 1
+    }
+
+    if (valid_count == 0) {
+        result := Seq[Int]()
+        var fi: Int := 0
+        while (fi < n)
+            invariant 0 <= fi && fi <= n
+            invariant |result| == fi
+            invariant forall j: Int :: { result[j] } 0 <= j && j < fi ==> result[j] == fp_zero()
+        {
+            result := result ++ Seq(fp_zero())
+            fi := fi + 1
+        }
+        return
+    }
+
+    if (max_s == min_s) {
+        result := Seq[Int]()
+        var fi: Int := 0
+        while (fi < n)
+            invariant 0 <= fi && fi <= n
+            invariant |result| == fi
+            invariant forall j: Int :: { result[j] } 0 <= j && j < fi ==> fp_is_valid(result[j])
+        {
+            var sv: Int := scores[fi]
+            if (fp_is_valid(sv)) {
+                result := result ++ Seq(fp_half())
+            } else {
+                result := result ++ Seq(fp_zero())
+            }
+            fi := fi + 1
+        }
+        return
+    }
+
+    var range: Int := fp_sub(max_s, min_s)
+    result := Seq[Int]()
+    var ni: Int := 0
+    while (ni < n)
+        invariant 0 <= ni && ni <= n
+        invariant |result| == ni
+        invariant forall j: Int :: { result[j] } 0 <= j && j < ni ==> fp_is_valid(result[j])
+        invariant fp_is_valid(range) && range > fp_zero()
+        invariant fp_is_valid(min_s)
+    {
+        var sv: Int := scores[ni]
+        if (fp_is_valid(sv)) {
+            var normed: Int := fp_div(fp_sub(sv, min_s), range)
+            if (!fp_is_valid(normed)) {
+                normed := fp_zero()
+            }
+            normed := fp_clamp(normed, fp_zero(), fp_one())
+            result := result ++ Seq(normed)
+        } else {
+            result := result ++ Seq(fp_zero())
+        }
+        ni := ni + 1
+    }
+}
+
+method compute_token_diversity(r: Ref, tokens: Seq[Int]) returns (diversity: Int)
+    requires valid_ranker_ro(r)
+    ensures valid_ranker_ro(r)
+    ensures score_is_normalized(diversity)
+{
+    diversity := compute_token_diversity_pure(tokens)
+}
+
+method compute_token_overlap(r: Ref, tokens: Seq[Int], query: Seq[Int]) returns (overlap_score: Int)
+    requires valid_ranker_ro(r)
+    ensures valid_ranker_ro(r)
+    ensures score_is_normalized(overlap_score)
+{
+    overlap_score := compute_token_overlap_pure(tokens, query)
+}
+
+method compute_jaccard_similarity(r: Ref, tokens: Seq[Int], query: Seq[Int]) returns (jaccard: Int)
+    requires valid_ranker_ro(r)
+    ensures valid_ranker_ro(r)
+    ensures score_is_normalized(jaccard)
+{
+    jaccard := compute_jaccard_pure(tokens, query)
+}
+
+method rank_candidates(r: Ref, cands: Seq[Ref], n: Int, ssi: Ref)
+    requires valid_ranker_ro(r)
+    requires valid_ssi_ro(ssi)
+    requires valid_candidate_list(cands, n)
+    ensures valid_ranker_ro(r)
+    ensures valid_ssi_ro(ssi)
+    ensures valid_candidate_list(cands, n)
+{
+    if (n == 0) {
+        return
+    }
+
+    unfold valid_candidate_list(cands, n)
+
+    var scores: Seq[Int] := Seq[Int]()
+    var si: Int := 0
+    while (si < n)
+        invariant 0 <= si && si <= n
+        invariant |scores| == si
+        invariant forall j: Int :: { scores[j] } 0 <= j && j < si ==> score_is_normalized(scores[j])
+        invariant valid_ranker_ro(r)
+        invariant valid_ssi_ro(ssi)
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+    {
+        var cand_ref: Ref := cands[si]
+        unfold valid_ranked_segment(cand_ref)
+        var toks: Seq[Int] := cand_ref.seg_tokens
+        fold valid_ranked_segment(cand_ref)
+        var sc: Int := score_sequence(r, toks, ssi)
+        scores := scores ++ Seq(sc)
+        si := si + 1
+    }
+
+    var normed: Seq[Int] := normalize_scores_static(scores)
+
+    var sorted_indices: Seq[Int] := sort_indices_desc_nan_safe(normed, n)
+
+    var new_tokens: Seq[Seq[Int]] := Seq[Seq[Int]]()
+    var new_scores: Seq[Int] := Seq[Int]()
+    var new_positions: Seq[Int] := Seq[Int]()
+    var new_anchors: Seq[Bool] := Seq[Bool]()
+
+    var gi: Int := 0
+    while (gi < n)
+        invariant 0 <= gi && gi <= n
+        invariant |new_tokens| == gi
+        invariant |new_scores| == gi
+        invariant |new_positions| == gi
+        invariant |new_anchors| == gi
+        invariant |sorted_indices| == n
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+        invariant forall i: Int :: { sorted_indices[i] } 0 <= i && i < n ==> (0 <= sorted_indices[i] && sorted_indices[i] < n)
+    {
+        var src: Int := sorted_indices[gi]
+        var src_ref: Ref := cands[src]
+        unfold valid_ranked_segment(src_ref)
+        new_tokens := new_tokens ++ Seq(src_ref.seg_tokens)
+        new_scores := new_scores ++ Seq(normed[src])
+        new_positions := new_positions ++ Seq(src_ref.seg_position)
+        new_anchors := new_anchors ++ Seq(src_ref.seg_anchor)
+        fold valid_ranked_segment(src_ref)
+        gi := gi + 1
+    }
+
+    var wi: Int := 0
+    while (wi < n)
+        invariant 0 <= wi && wi <= n
+        invariant |new_tokens| == n
+        invariant |new_scores| == n
+        invariant |new_positions| == n
+        invariant |new_anchors| == n
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> (wi <= i ==> valid_ranked_segment(cands[i]))
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < wi ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+    {
+        var c_ref: Ref := cands[wi]
+        unfold valid_ranked_segment(c_ref)
+        c_ref.seg_tokens := new_tokens[wi]
+        c_ref.seg_tokens_len := |new_tokens[wi]|
+        c_ref.seg_score := new_scores[wi]
+        c_ref.seg_position := new_positions[wi]
+        c_ref.seg_anchor := new_anchors[wi]
+        fold valid_ranked_segment(c_ref)
+        wi := wi + 1
+    }
+
+    fold valid_candidate_list(cands, n)
+}
+
+method rank_candidates_with_query(r: Ref, cands: Seq[Ref], n: Int, query: Seq[Int], ssi: Ref)
+    requires valid_ranker_ro(r)
+    requires valid_ssi_ro(ssi)
+    requires valid_candidate_list(cands, n)
+    requires |query| >= 0
+    ensures valid_ranker_ro(r)
+    ensures valid_ssi_ro(ssi)
+    ensures valid_candidate_list(cands, n)
+{
+    if (n == 0) {
+        return
+    }
+
+    unfold valid_candidate_list(cands, n)
+
+    var scores: Seq[Int] := Seq[Int]()
+    var si: Int := 0
+    while (si < n)
+        invariant 0 <= si && si <= n
+        invariant |scores| == si
+        invariant forall j: Int :: { scores[j] } 0 <= j && j < si ==> score_is_normalized(scores[j])
+        invariant valid_ranker_ro(r)
+        invariant valid_ssi_ro(ssi)
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+    {
+        var cand_ref: Ref := cands[si]
+        unfold valid_ranked_segment(cand_ref)
+        var toks: Seq[Int] := cand_ref.seg_tokens
+        fold valid_ranked_segment(cand_ref)
+        var sc: Int := score_sequence_with_query(r, toks, query, ssi)
+        scores := scores ++ Seq(sc)
+        si := si + 1
+    }
+
+    var normed: Seq[Int] := normalize_scores_static(scores)
+
+    var sorted_indices: Seq[Int] := sort_indices_desc_nan_safe(normed, n)
+
+    var new_tokens: Seq[Seq[Int]] := Seq[Seq[Int]]()
+    var new_scores: Seq[Int] := Seq[Int]()
+    var new_positions: Seq[Int] := Seq[Int]()
+    var new_anchors: Seq[Bool] := Seq[Bool]()
+
+    var gi: Int := 0
+    while (gi < n)
+        invariant 0 <= gi && gi <= n
+        invariant |new_tokens| == gi
+        invariant |new_scores| == gi
+        invariant |new_positions| == gi
+        invariant |new_anchors| == gi
+        invariant |sorted_indices| == n
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+        invariant forall i: Int :: { sorted_indices[i] } 0 <= i && i < n ==> (0 <= sorted_indices[i] && sorted_indices[i] < n)
+    {
+        var src: Int := sorted_indices[gi]
+        var src_ref: Ref := cands[src]
+        unfold valid_ranked_segment(src_ref)
+        new_tokens := new_tokens ++ Seq(src_ref.seg_tokens)
+        new_scores := new_scores ++ Seq(normed[src])
+        new_positions := new_positions ++ Seq(src_ref.seg_position)
+        new_anchors := new_anchors ++ Seq(src_ref.seg_anchor)
+        fold valid_ranked_segment(src_ref)
+        gi := gi + 1
+    }
+
+    var wi: Int := 0
+    while (wi < n)
+        invariant 0 <= wi && wi <= n
+        invariant |new_tokens| == n
+        invariant |new_scores| == n
+        invariant |new_positions| == n
+        invariant |new_anchors| == n
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> (wi <= i ==> valid_ranked_segment(cands[i]))
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < wi ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+    {
+        var c_ref: Ref := cands[wi]
+        unfold valid_ranked_segment(c_ref)
+        c_ref.seg_tokens := new_tokens[wi]
+        c_ref.seg_tokens_len := |new_tokens[wi]|
+        c_ref.seg_score := new_scores[wi]
+        c_ref.seg_position := new_positions[wi]
+        c_ref.seg_anchor := new_anchors[wi]
+        fold valid_ranked_segment(c_ref)
+        wi := wi + 1
+    }
+
+    fold valid_candidate_list(cands, n)
+}
+
+method sort_indices_desc_nan_safe(scores: Seq[Int], n: Int) returns (sorted: Seq[Int])
+    requires n >= 0
+    requires |scores| == n
+    ensures |sorted| == n
+    ensures forall i: Int :: { sorted[i] } 0 <= i && i < n ==> (0 <= sorted[i] && sorted[i] < n)
+    ensures forall i: Int, j: Int :: { sorted[i], sorted[j] }
+        0 <= i && i < j && j < n ==>
+            (fp_is_valid(scores[sorted[i]]) && fp_is_valid(scores[sorted[j]]) ==> scores[sorted[i]] >= scores[sorted[j]])
+{
+    sorted := Seq[Int]()
+    var ii: Int := 0
+    while (ii < n)
+        invariant 0 <= ii && ii <= n
+        invariant |sorted| == ii
+        invariant forall j: Int :: { sorted[j] } 0 <= j && j < ii ==> sorted[j] == j
+    {
+        sorted := sorted ++ Seq(ii)
+        ii := ii + 1
+    }
+
+    var oi: Int := 0
+    while (oi < n)
+        invariant 0 <= oi && oi <= n
+        invariant |sorted| == n
+        invariant forall i: Int :: { sorted[i] } 0 <= i && i < n ==> (0 <= sorted[i] && sorted[i] < n)
+    {
+        var best: Int := oi
+        var bi: Int := oi + 1
+        while (bi < n)
+            invariant oi <= best && best < n
+            invariant oi + 1 <= bi && bi <= n
+            invariant |sorted| == n
+            invariant forall i: Int :: { sorted[i] } 0 <= i && i < n ==> (0 <= sorted[i] && sorted[i] < n)
+            invariant 0 <= sorted[best] && sorted[best] < n
+        {
+            var s_best: Int := scores[sorted[best]]
+            var s_bi: Int := scores[sorted[bi]]
+
+            var swap_needed: Bool := false
+            if (fp_is_nan(s_best) && !fp_is_nan(s_bi)) {
+                swap_needed := true
+            } elseif (fp_is_valid(s_best) && fp_is_valid(s_bi) && s_bi > s_best) {
+                swap_needed := true
+            }
+
+            if (swap_needed) {
+                best := bi
+            }
+            bi := bi + 1
+        }
+
+        if (best != oi) {
+            var tmp: Int := sorted[oi]
+            sorted := sorted[oi := sorted[best]]
+            sorted := sorted[best := tmp]
+        }
+        oi := oi + 1
+    }
+}
+
+method batch_score(r: Ref, sequences: Seq[Seq[Int]], ssi: Ref) returns (scores: Seq[Int])
+    requires valid_ranker_ro(r)
+    requires valid_ssi_ro(ssi)
+    ensures valid_ranker_ro(r)
+    ensures valid_ssi_ro(ssi)
+    ensures |scores| == |sequences|
+    ensures forall i: Int :: { scores[i] } 0 <= i && i < |scores| ==> score_is_normalized(scores[i])
+{
+    var batch_size: Int := |sequences|
+    if (batch_size == 0) {
+        scores := Seq[Int]()
+        return
+    }
+
+    scores := Seq[Int]()
+    var bi: Int := 0
+    while (bi < batch_size)
+        invariant 0 <= bi && bi <= batch_size
+        invariant |scores| == bi
+        invariant forall j: Int :: { scores[j] } 0 <= j && j < bi ==> score_is_normalized(scores[j])
+        invariant valid_ranker_ro(r)
+        invariant valid_ssi_ro(ssi)
+    {
+        var sc: Int := score_sequence(r, sequences[bi], ssi)
+        scores := scores ++ Seq(sc)
+        bi := bi + 1
+    }
+}
+
+method top_k_heap(r: Ref, ssi: Ref, query: Seq[Int], k: Int) returns (result: Seq[Ref])
+    requires valid_ranker_ro(r)
+    requires valid_ssi_ro(ssi)
+    requires k >= 0
+    requires |query| >= 0
+    ensures valid_ranker_ro(r)
+    ensures valid_ssi_ro(ssi)
+    ensures |result| <= k
+    ensures forall i: Int :: { result[i] } 0 <= i && i < |result| ==> valid_ranked_segment(result[i])
+    ensures forall i: Int, j: Int :: { result[i], result[j] } 0 <= i && i < j && j < |result| ==> result[i] != result[j]
+{
+    if (k == 0) {
+        result := Seq[Ref]()
+        return
+    }
+
+    var retrieval_count: Int := int_max(k, DEFAULT_TOP_K_RETRIEVAL())
+
+    var cands: Seq[Ref] := retrieve_from_ssi(ssi, query, retrieval_count)
+    var cands_len: Int := |cands|
+
+    var heap_items: Seq[Ref] := Seq[Ref]()
+    var heap_size: Int := 0
+
+    var ci: Int := 0
+    while (ci < cands_len)
+        invariant 0 <= ci && ci <= cands_len
+        invariant heap_size >= 0 && heap_size <= k
+        invariant |heap_items| == heap_size
+        invariant valid_ranker_ro(r)
+        invariant valid_ssi_ro(ssi)
+        invariant forall i: Int :: { heap_items[i] } 0 <= i && i < heap_size ==> valid_ranked_segment(heap_items[i])
+        invariant forall i: Int, j: Int :: { heap_items[i], heap_items[j] } 0 <= i && i < j && j < heap_size ==> heap_items[i] != heap_items[j]
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < cands_len ==> valid_ranked_segment_ro(cands[i])
+    {
+        var cand_ref: Ref := cands[ci]
+        unfold valid_ranked_segment_ro(cand_ref)
+        var toks: Seq[Int] := cand_ref.seg_tokens
+        var pos: Int := cand_ref.seg_position
+        var anch: Bool := cand_ref.seg_anchor
+        fold valid_ranked_segment_ro(cand_ref)
+
+        var sc: Int := score_sequence_with_query(r, toks, query, ssi)
+
+        if (fp_is_valid(sc)) {
+            if (heap_size < k) {
+                var new_seg: Ref := create_ranked_segment(toks, sc, pos, anch)
+                heap_items := heap_items ++ Seq(new_seg)
+                heap_size := heap_size + 1
+            } else {
+                var min_idx: Int := find_min_score_idx(heap_items, heap_size)
+                unfold valid_ranked_segment(heap_items[min_idx])
+                var min_sc: Int := heap_items[min_idx].seg_score
+                fold valid_ranked_segment(heap_items[min_idx])
+                if (sc > min_sc) {
+                    var old_ref: Ref := heap_items[min_idx]
+                    var new_seg: Ref := create_ranked_segment(toks, sc, pos, anch)
+                    heap_items := heap_items[min_idx := new_seg]
+                }
+            }
+        }
+        ci := ci + 1
+    }
+
+    var sorted_heap: Seq[Ref] := sort_segments_desc(heap_items, heap_size)
+    result := sorted_heap
+}
+
+method retrieve_from_ssi(ssi: Ref, query: Seq[Int], k: Int) returns (result: Seq[Ref])
+    requires valid_ssi_ro(ssi)
+    requires k >= 0
+    ensures valid_ssi_ro(ssi)
+    ensures |result| <= k
+    ensures forall i: Int :: { result[i] } 0 <= i && i < |result| ==> valid_ranked_segment_ro(result[i])
+{
+    unfold valid_ssi_ro(ssi)
+    var entries: Map[Int, Ref] := ssi.ssi_entries
+    var sz: Int := ssi.ssi_size
+    fold valid_ssi_ro(ssi)
+
+    result := Seq[Ref]()
+}
+
+method create_ranked_segment(tokens: Seq[Int], score: Int, position: Int, anchor: Bool) returns (seg: Ref)
+    requires fp_is_valid(score)
+    requires position >= 0
+    ensures valid_ranked_segment(seg)
+    ensures unfolding valid_ranked_segment(seg) in seg.seg_tokens == tokens
+    ensures unfolding valid_ranked_segment(seg) in seg.seg_score == score
+    ensures unfolding valid_ranked_segment(seg) in seg.seg_position == position
+    ensures unfolding valid_ranked_segment(seg) in seg.seg_anchor == anchor
+    ensures unfolding valid_ranked_segment(seg) in seg.seg_tokens_len == |tokens|
+{
+    seg := new(seg_tokens, seg_tokens_len, seg_score, seg_position, seg_anchor)
+    seg.seg_tokens := tokens
+    seg.seg_tokens_len := |tokens|
+    seg.seg_score := score
+    seg.seg_position := position
+    seg.seg_anchor := anchor
+    fold valid_ranked_segment(seg)
+}
+
+method destroy_ranked_segment(seg: Ref)
+    requires valid_ranked_segment(seg)
+{
+    unfold valid_ranked_segment(seg)
+}
+
+method find_min_score_idx(items: Seq[Ref], n: Int) returns (idx: Int)
+    requires n > 0
+    requires |items| == n
+    requires forall i: Int :: { items[i] } 0 <= i && i < n ==> valid_ranked_segment(items[i])
+    ensures 0 <= idx && idx < n
+    ensures forall i: Int :: { items[i] } 0 <= i && i < n ==> valid_ranked_segment(items[i])
+{
+    idx := 0
+    unfold valid_ranked_segment(items[0])
+    var min_sc: Int := items[0].seg_score
+    fold valid_ranked_segment(items[0])
+
+    var fi: Int := 1
+    while (fi < n)
+        invariant 1 <= fi && fi <= n
+        invariant 0 <= idx && idx < n
+        invariant fp_is_valid(min_sc)
+        invariant forall i: Int :: { items[i] } 0 <= i && i < n ==> valid_ranked_segment(items[i])
+    {
+        unfold valid_ranked_segment(items[fi])
+        var cur_sc: Int := items[fi].seg_score
+        fold valid_ranked_segment(items[fi])
+        if (fp_is_valid(cur_sc) && cur_sc < min_sc) {
+            min_sc := cur_sc
+            idx := fi
+        }
+        fi := fi + 1
+    }
+}
+
+method sort_segments_desc(items: Seq[Ref], n: Int) returns (sorted: Seq[Ref])
+    requires n >= 0
+    requires |items| == n
+    requires forall i: Int :: { items[i] } 0 <= i && i < n ==> valid_ranked_segment(items[i])
+    requires forall i: Int, j: Int :: { items[i], items[j] } 0 <= i && i < j && j < n ==> items[i] != items[j]
+    ensures |sorted| == n
+    ensures forall i: Int :: { sorted[i] } 0 <= i && i < n ==> valid_ranked_segment(sorted[i])
+    ensures forall i: Int, j: Int :: { sorted[i], sorted[j] } 0 <= i && i < j && j < n ==> sorted[i] != sorted[j]
+{
+    sorted := items
+
+    var oi: Int := 0
+    while (oi < n)
+        invariant 0 <= oi && oi <= n
+        invariant |sorted| == n
+        invariant forall i: Int :: { sorted[i] } 0 <= i && i < n ==> valid_ranked_segment(sorted[i])
+        invariant forall i: Int, j: Int :: { sorted[i], sorted[j] } 0 <= i && i < j && j < n ==> sorted[i] != sorted[j]
+    {
+        var best: Int := oi
+        var bi: Int := oi + 1
+        while (bi < n)
+            invariant oi <= best && best < n
+            invariant oi + 1 <= bi && bi <= n
+            invariant |sorted| == n
+            invariant forall i: Int :: { sorted[i] } 0 <= i && i < n ==> valid_ranked_segment(sorted[i])
+            invariant forall i: Int, j: Int :: { sorted[i], sorted[j] } 0 <= i && i < j && j < n ==> sorted[i] != sorted[j]
+        {
+            unfold valid_ranked_segment(sorted[best])
+            var s_best: Int := sorted[best].seg_score
+            fold valid_ranked_segment(sorted[best])
+
+            unfold valid_ranked_segment(sorted[bi])
+            var s_bi: Int := sorted[bi].seg_score
+            fold valid_ranked_segment(sorted[bi])
+
+            if (fp_is_valid(s_bi) && (!fp_is_valid(s_best) || s_bi > s_best)) {
+                best := bi
+            }
+            bi := bi + 1
+        }
+
+        if (best != oi) {
+            var tmp: Ref := sorted[oi]
+            sorted := sorted[oi := sorted[best]]
+            sorted := sorted[best := tmp]
+        }
+        oi := oi + 1
+    }
+}
+
+method update_weights(r: Ref, gradients: Seq[Int])
+    requires valid_ranker(r)
+    requires |gradients| >= 0
+    ensures valid_ranker(r)
+{
+    unfold valid_ranker(r)
+    var wts: Seq[Int] := r.ngram_weights
+    var wlen: Int := r.ngram_weights_len
+    var glen: Int := |gradients|
+    var bound: Int := int_min(wlen, glen)
+
+    var ui: Int := 0
+    while (ui < bound)
+        invariant 0 <= ui && ui <= bound
+        invariant |wts| == wlen
+        invariant wlen == r.num_ngrams
+        invariant acc(r.ngram_weights)
+        invariant acc(r.ngram_weights_len)
+        invariant acc(r.lsh_hash_params)
+        invariant acc(r.lsh_hash_params_len)
+        invariant acc(r.num_hash_functions)
+        invariant acc(r.num_ngrams)
+        invariant acc(r.ranker_seed)
+        invariant r.num_ngrams > 0
+        invariant r.num_hash_functions > 0
+        invariant r.ngram_weights_len == r.num_ngrams
+        invariant r.lsh_hash_params_len == r.num_hash_functions * 2
+        invariant |r.lsh_hash_params| == r.num_hash_functions * 2
+        invariant forall j: Int :: { wts[j] }
+            0 <= j && j < wlen ==>
+                fp_is_valid(wts[j]) &&
+                wts[j] >= fp_zero() &&
+                wts[j] <= fp_one()
+    {
+        var grad: Int := gradients[ui]
+        if (fp_is_valid(grad)) {
+            var current: Int := wts[ui]
+            var updated: Int := fp_sub(current, grad)
+            updated := fp_clamp(updated, fp_zero(), fp_one())
+            wts := wts[ui := updated]
+        }
+        ui := ui + 1
+    }
+
+    r.ngram_weights := wts
+
+    fold valid_ranker(r)
+}
+
+method min_hash_signature(r: Ref, tokens: Seq[Int]) returns (sig: Seq[Int])
+    requires valid_ranker_ro(r)
+    ensures valid_ranker_ro(r)
+    ensures |sig| == unfolding valid_ranker_ro(r) in r.num_hash_functions
+{
+    unfold valid_ranker_ro(r)
+    var num_hf: Int := r.num_hash_functions
+    var hp: Seq[Int] := r.lsh_hash_params
+    fold valid_ranker_ro(r)
+
+    var tokens_len: Int := |tokens|
+
+    if (tokens_len == 0) {
+        sig := Seq[Int]()
+        var ei: Int := 0
+        while (ei < num_hf)
+            invariant 0 <= ei && ei <= num_hf
+            invariant |sig| == ei
+        {
+            sig := sig ++ Seq(MAX_U64())
+            ei := ei + 1
+        }
+        return
+    }
+
+    sig := Seq[Int]()
+    var hi: Int := 0
+    while (hi < num_hf)
+        invariant 0 <= hi && hi <= num_hf
+        invariant |sig| == hi
+        invariant |hp| == num_hf * 2
+    {
+        var min_hash: Int := MAX_U64()
+        var seed_a: Int := hp[hi * 2]
+        var seed_b: Int := hp[hi * 2 + 1]
+
+        var ti: Int := 0
+        while (ti < tokens_len)
+            invariant 0 <= ti && ti <= tokens_len
+            invariant min_hash >= 0
+        {
+            var token_le: Seq[Int] := token_to_le_bytes(tokens[ti])
+            var hv: Int := hash_xor(stable_hash_single(token_le, seed_a), seed_b)
+            if (hv >= 0 && hv < min_hash) {
+                min_hash := hv
+            }
+            ti := ti + 1
+        }
+        sig := sig ++ Seq(min_hash)
+        hi := hi + 1
+    }
+}
+
+method jaccard_similarity_from_signatures(sig1: Seq[Int], sig2: Seq[Int]) returns (sim: Int)
+    ensures score_is_normalized(sim)
+{
+    var len1: Int := |sig1|
+    var len2: Int := |sig2|
+
+    if (len1 != len2 || len1 == 0) {
+        sim := fp_zero()
+        return
+    }
+
+    var matches: Int := 0
+    var ji: Int := 0
+    while (ji < len1)
+        invariant 0 <= ji && ji <= len1
+        invariant matches >= 0 && matches <= ji
+    {
+        if (sig1[ji] == sig2[ji]) {
+            matches := matches + 1
+        }
+        ji := ji + 1
+    }
+
+    sim := fp_clamp(fp_div(fp_from_int(matches), fp_from_int(len1)), fp_zero(), fp_one())
+}
+
+method estimate_jaccard(set1: Ref, set2: Ref) returns (est: Int)
+    requires valid_bitset_ro(set1)
+    requires valid_bitset_ro(set2)
+    ensures valid_bitset_ro(set1)
+    ensures valid_bitset_ro(set2)
+    ensures score_is_normalized(est)
+{
+    unfold valid_bitset_ro(set1)
+    unfold valid_bitset_ro(set2)
+
+    var len1: Int := set1.bitset_words_len
+    var len2: Int := set2.bitset_words_len
+    var max_words: Int := int_max(len1, len2)
+
+    if (max_words == 0) {
+        fold valid_bitset_ro(set1)
+        fold valid_bitset_ro(set2)
+        est := fp_one()
+        return
+    }
+
+    var bits1: Seq[Int] := set1.bitset_words
+    var bits2: Seq[Int] := set2.bitset_words
+
+    fold valid_bitset_ro(set1)
+    fold valid_bitset_ro(set2)
+
+    var intersect_count: Int := 0
+    var union_count: Int := 0
+
+    var ei: Int := 0
+    while (ei < max_words)
+        invariant 0 <= ei && ei <= max_words
+        invariant intersect_count >= 0
+        invariant union_count >= 0
+        invariant intersect_count <= union_count
+    {
+        var w1: Int := 0
+        if (ei < len1) {
+            w1 := bits1[ei]
+        }
+        var w2: Int := 0
+        if (ei < len2) {
+            w2 := bits2[ei]
+        }
+        intersect_count := intersect_count + popcount(bitwise_and(w1, w2))
+        union_count := union_count + popcount(bitwise_or(w1, w2))
+        ei := ei + 1
+    }
+
+    if (union_count == 0) {
+        est := fp_one()
+        return
+    }
+
+    est := fp_clamp(fp_div(fp_from_int(intersect_count), fp_from_int(union_count)), fp_zero(), fp_one())
+}
+
+method vector_score(embedding: Ref, query_emb: Ref) returns (result: Int)
+    requires valid_tensor_ro(embedding)
+    requires valid_tensor_ro(query_emb)
+    ensures valid_tensor_ro(embedding)
+    ensures valid_tensor_ro(query_emb)
+    ensures score_is_cosine(result)
+{
+    unfold valid_tensor_ro(embedding)
+    unfold valid_tensor_ro(query_emb)
+
+    var emb_shape: Seq[Int] := embedding.tensor_shape
+    var q_shape: Seq[Int] := query_emb.tensor_shape
+    var emb_len: Int := embedding.tensor_data_len
+    var q_len: Int := query_emb.tensor_data_len
+    var emb_rank: Int := embedding.tensor_rank
+    var q_rank: Int := query_emb.tensor_rank
+
+    if (emb_rank != q_rank || emb_len != q_len || emb_shape != q_shape) {
+        fold valid_tensor_ro(embedding)
+        fold valid_tensor_ro(query_emb)
+        result := fp_zero()
+        return
+    }
+
+    if (emb_len == 0) {
+        fold valid_tensor_ro(embedding)
+        fold valid_tensor_ro(query_emb)
+        result := fp_zero()
+        return
+    }
+
+    var emb_data: Seq[Int] := embedding.tensor_data
+    var q_data: Seq[Int] := query_emb.tensor_data
+
+    fold valid_tensor_ro(embedding)
+    fold valid_tensor_ro(query_emb)
+
+    var dot_prod: Int := fp_zero()
+    var norm_emb: Int := fp_zero()
+    var norm_query: Int := fp_zero()
+
+    var vi: Int := 0
+    while (vi < emb_len)
+        invariant 0 <= vi && vi <= emb_len
+        invariant fp_is_valid(dot_prod)
+        invariant fp_is_valid(norm_emb) && norm_emb >= fp_zero()
+        invariant fp_is_valid(norm_query) && norm_query >= fp_zero()
+        invariant |emb_data| == emb_len
+        invariant |q_data| == emb_len
+    {
+        var e: Int := emb_data[vi]
+        var q: Int := q_data[vi]
+
+        if (fp_is_valid(e) && fp_is_valid(q)) {
+            var prod: Int := fp_mul(e, q)
+            if (fp_is_valid(prod)) {
+                dot_prod := fp_add(dot_prod, prod)
+                if (!fp_is_valid(dot_prod)) {
+                    dot_prod := fp_zero()
+                }
+            }
+            var e_sq: Int := fp_mul(e, e)
+            if (fp_is_valid(e_sq) && e_sq >= fp_zero()) {
+                norm_emb := fp_add(norm_emb, e_sq)
+                if (!fp_is_valid(norm_emb) || norm_emb < fp_zero()) {
+                    norm_emb := fp_zero()
+                }
+            }
+            var q_sq: Int := fp_mul(q, q)
+            if (fp_is_valid(q_sq) && q_sq >= fp_zero()) {
+                norm_query := fp_add(norm_query, q_sq)
+                if (!fp_is_valid(norm_query) || norm_query < fp_zero()) {
+                    norm_query := fp_zero()
+                }
+            }
+        }
+        vi := vi + 1
+    }
+
+    if (norm_emb <= fp_zero() || norm_query <= fp_zero()) {
+        result := fp_zero()
+        return
+    }
+
+    var sqrt_emb: Int := fp_sqrt(norm_emb)
+    var sqrt_query: Int := fp_sqrt(norm_query)
+
+    if (sqrt_emb == fp_zero() || sqrt_query == fp_zero()) {
+        result := fp_zero()
+        return
+    }
+
+    var denom: Int := fp_mul(sqrt_emb, sqrt_query)
+    if (!fp_is_valid(denom) || denom == fp_zero()) {
+        result := fp_zero()
+        return
+    }
+
+    var raw: Int := fp_div(dot_prod, denom)
+    if (!fp_is_valid(raw)) {
+        result := fp_zero()
+        return
+    }
+
+    result := fp_clamp(raw, fp_neg_one(), fp_one())
+}
+
+method dot_product_score(embedding: Ref, query_emb: Ref) returns (result: Int)
+    requires valid_tensor_ro(embedding)
+    requires valid_tensor_ro(query_emb)
+    ensures valid_tensor_ro(embedding)
+    ensures valid_tensor_ro(query_emb)
+    ensures fp_is_valid(result)
+{
+    unfold valid_tensor_ro(embedding)
+    unfold valid_tensor_ro(query_emb)
+
+    var emb_shape: Seq[Int] := embedding.tensor_shape
+    var q_shape: Seq[Int] := query_emb.tensor_shape
+    var emb_len: Int := embedding.tensor_data_len
+    var q_len: Int := query_emb.tensor_data_len
+
+    if (emb_shape != q_shape || emb_len != q_len) {
+        fold valid_tensor_ro(embedding)
+        fold valid_tensor_ro(query_emb)
+        result := fp_zero()
+        return
+    }
+
+    if (emb_len == 0) {
+        fold valid_tensor_ro(embedding)
+        fold valid_tensor_ro(query_emb)
+        result := fp_zero()
+        return
+    }
+
+    var emb_data: Seq[Int] := embedding.tensor_data
+    var q_data: Seq[Int] := query_emb.tensor_data
+
+    fold valid_tensor_ro(embedding)
+    fold valid_tensor_ro(query_emb)
+
+    var dot: Int := fp_zero()
+    var di: Int := 0
+    while (di < emb_len)
+        invariant 0 <= di && di <= emb_len
+        invariant fp_is_valid(dot)
+        invariant |emb_data| == emb_len
+        invariant |q_data| == emb_len
+    {
+        var e: Int := emb_data[di]
+        var q: Int := q_data[di]
+        if (fp_is_valid(e) && fp_is_valid(q)) {
+            var p: Int := fp_mul(e, q)
+            if (fp_is_valid(p)) {
+                dot := fp_add(dot, p)
+                if (!fp_is_valid(dot)) {
+                    dot := fp_zero()
+                }
+            }
+        }
+        di := di + 1
+    }
+
+    result := dot
+}
+
+method weighted_average(scores: Seq[Int], weights: Seq[Int]) returns (result: Int)
+    requires |scores| == |weights|
+    ensures fp_is_valid(result)
+{
+    var n: Int := |scores|
+    if (n == 0) {
+        result := fp_zero()
+        return
+    }
+
+    var num: Int := fp_zero()
+    var den: Int := fp_zero()
+    var wi: Int := 0
+    while (wi < n)
+        invariant 0 <= wi && wi <= n
+        invariant fp_is_valid(num)
+        invariant fp_is_valid(den) && den >= fp_zero()
+    {
+        var s: Int := scores[wi]
+        var w: Int := weights[wi]
+        if (fp_is_valid(s) && fp_is_valid(w)) {
+            var prod: Int := fp_mul(s, w)
+            if (fp_is_valid(prod)) {
+                num := fp_add(num, prod)
+                if (!fp_is_valid(num)) {
+                    num := fp_zero()
+                }
+            }
+            if (w >= fp_zero()) {
+                den := fp_add(den, w)
+                if (!fp_is_valid(den) || den < fp_zero()) {
+                    den := fp_zero()
+                }
+            }
+        }
+        wi := wi + 1
+    }
+
+    if (den == fp_zero()) {
+        result := fp_zero()
+        return
+    }
+
+    result := fp_div(num, den)
+    if (!fp_is_valid(result)) {
+        result := fp_zero()
+    }
+}
+
+method exponential_decay(scores: Seq[Int], decay_factor: Int) returns (result: Seq[Int])
+    requires fp_is_valid(decay_factor)
+    requires decay_factor > fp_zero() && decay_factor < fp_one()
+    ensures |result| == |scores|
+    ensures forall i: Int :: { result[i] } 0 <= i && i < |result| ==> fp_is_valid(result[i])
+{
+    var n: Int := |scores|
+    if (n == 0) {
+        result := Seq[Int]()
+        return
+    }
+
+    result := Seq[Int]()
+    var current_decay: Int := fp_one()
+    var ei: Int := 0
+    while (ei < n)
+        invariant 0 <= ei && ei <= n
+        invariant |result| == ei
+        invariant fp_is_valid(current_decay)
+        invariant current_decay >= fp_zero()
+        invariant current_decay <= fp_one()
+        invariant forall j: Int :: { result[j] } 0 <= j && j < ei ==> fp_is_valid(result[j])
+    {
+        var s: Int := scores[ei]
+        if (fp_is_valid(s)) {
+            var decayed: Int := fp_mul(s, current_decay)
+            if (!fp_is_valid(decayed)) {
+                decayed := fp_zero()
+            }
+            result := result ++ Seq(decayed)
+        } else {
+            result := result ++ Seq(fp_zero())
+        }
+        var next_decay: Int := fp_mul(current_decay, decay_factor)
+        if (fp_is_valid(next_decay) && next_decay >= fp_zero() && next_decay <= fp_one()) {
+            current_decay := next_decay
+        } else {
+            current_decay := fp_zero()
+        }
+        ei := ei + 1
+    }
+}
+
+method rank_by_multiple_criteria(cands: Seq[Ref], n: Int, criteria: Seq[Seq[Int]], weights: Seq[Int])
+    requires valid_candidate_list(cands, n)
+    requires |criteria| >= 0
+    requires |weights| >= 0
+    ensures valid_candidate_list(cands, n)
+{
+    if (n == 0 || |criteria| == 0 || |weights| == 0) {
+        return
+    }
+
+    var num_crit: Int := int_min(|criteria|, |weights|)
+
+    unfold valid_candidate_list(cands, n)
+
+    var combined: Seq[Int] := Seq[Int]()
+    var ci: Int := 0
+    while (ci < n)
+        invariant 0 <= ci && ci <= n
+        invariant |combined| == ci
+        invariant forall j: Int :: { combined[j] } 0 <= j && j < ci ==> fp_is_valid(combined[j])
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+    {
+        var crit_score: Int := fp_zero()
+        var cri: Int := 0
+        while (cri < num_crit)
+            invariant 0 <= cri && cri <= num_crit
+            invariant fp_is_valid(crit_score)
+        {
+            if (ci < |criteria[cri]|) {
+                var sv: Int := criteria[cri][ci]
+                var wv: Int := weights[cri]
+                if (fp_is_valid(sv) && fp_is_valid(wv)) {
+                    var contrib: Int := fp_mul(sv, wv)
+                    if (fp_is_valid(contrib)) {
+                        crit_score := fp_add(crit_score, contrib)
+                        if (!fp_is_valid(crit_score)) {
+                            crit_score := fp_zero()
+                        }
+                    }
+                }
+            }
+            cri := cri + 1
+        }
+        combined := combined ++ Seq(crit_score)
+        ci := ci + 1
+    }
+
+    var sorted_indices: Seq[Int] := sort_indices_desc_nan_safe(combined, n)
+
+    var new_tokens: Seq[Seq[Int]] := Seq[Seq[Int]]()
+    var new_scores: Seq[Int] := Seq[Int]()
+    var new_positions: Seq[Int] := Seq[Int]()
+    var new_anchors: Seq[Bool] := Seq[Bool]()
+
+    var gi: Int := 0
+    while (gi < n)
+        invariant 0 <= gi && gi <= n
+        invariant |new_tokens| == gi
+        invariant |new_scores| == gi
+        invariant |new_positions| == gi
+        invariant |new_anchors| == gi
+        invariant |sorted_indices| == n
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+        invariant forall i: Int :: { sorted_indices[i] } 0 <= i && i < n ==> (0 <= sorted_indices[i] && sorted_indices[i] < n)
+    {
+        var src: Int := sorted_indices[gi]
+        var src_ref: Ref := cands[src]
+        unfold valid_ranked_segment(src_ref)
+        new_tokens := new_tokens ++ Seq(src_ref.seg_tokens)
+        new_scores := new_scores ++ Seq(combined[src])
+        new_positions := new_positions ++ Seq(src_ref.seg_position)
+        new_anchors := new_anchors ++ Seq(src_ref.seg_anchor)
+        fold valid_ranked_segment(src_ref)
+        gi := gi + 1
+    }
+
+    var wi: Int := 0
+    while (wi < n)
+        invariant 0 <= wi && wi <= n
+        invariant |new_tokens| == n
+        invariant |new_scores| == n
+        invariant |new_positions| == n
+        invariant |new_anchors| == n
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < n ==> (wi <= i ==> valid_ranked_segment(cands[i]))
+        invariant forall i: Int :: { cands[i] } 0 <= i && i < wi ==> valid_ranked_segment(cands[i])
+        invariant forall i: Int, j: Int :: { cands[i], cands[j] } 0 <= i && i < j && j < n ==> cands[i] != cands[j]
+    {
+        var c_ref: Ref := cands[wi]
+        unfold valid_ranked_segment(c_ref)
+        c_ref.seg_tokens := new_tokens[wi]
+        c_ref.seg_tokens_len := |new_tokens[wi]|
+        c_ref.seg_score := new_scores[wi]
+        c_ref.seg_position := new_positions[wi]
+        c_ref.seg_anchor := new_anchors[wi]
+        fold valid_ranked_segment(c_ref)
+        wi := wi + 1
+    }
+
+    fold valid_candidate_list(cands, n)
+}
+
+field stream_tokens: Seq[Int]
+field stream_tokens_len: Int
+field stream_has_data: Bool
+
+predicate valid_stream(s: Ref) {
+    acc(s.stream_tokens) &&
+    acc(s.stream_tokens_len) &&
+    acc(s.stream_has_data) &&
+    s.stream_tokens_len >= 0 &&
+    |s.stream_tokens| == s.stream_tokens_len
+}
+
+method stream_read_chunk(stream: Ref) returns (chunk: Seq[Int], bytes_read: Int)
+    requires valid_stream(stream)
+    ensures valid_stream(stream)
+    ensures bytes_read >= 0
+    ensures |chunk| == bytes_read
+{
+    unfold valid_stream(stream)
+    if (stream.stream_has_data && stream.stream_tokens_len > 0) {
+        var take: Int := int_min(stream.stream_tokens_len, STREAMING_BUFFER_SIZE())
+        chunk := stream.stream_tokens[..take]
+        bytes_read := take
+        stream.stream_tokens := stream.stream_tokens[take..]
+        stream.stream_tokens_len := stream.stream_tokens_len - take
+        if (stream.stream_tokens_len == 0) {
+            stream.stream_has_data := false
+        }
+    } else {
+        chunk := Seq[Int]()
+        bytes_read := 0
+    }
+    fold valid_stream(stream)
+}
+
+method streaming_rank(r: Ref, stream: Ref, ssi: Ref, k: Int) returns (result: Seq[Ref])
+    requires valid_ranker_ro(r)
+    requires valid_ssi_ro(ssi)
+    requires valid_stream(stream)
+    requires k >= 0
+    ensures valid_ranker_ro(r)
+    ensures valid_ssi_ro(ssi)
+    ensures valid_stream(stream)
+    ensures |result| <= k
+    ensures forall i: Int :: { result[i] } 0 <= i && i < |result| ==> valid_ranked_segment(result[i])
+    ensures forall i: Int, j: Int :: { result[i], result[j] } 0 <= i && i < j && j < |result| ==> result[i] != result[j]
+{
+    if (k == 0) {
+        result := Seq[Ref]()
+        return
+    }
+
+    var rolling: Seq[Int] := Seq[Int]()
+    var heap_items: Seq[Ref] := Seq[Ref]()
+    var heap_size: Int := 0
+    var position: Int := 0
+    var done: Bool := false
+
+    while (!done)
+        invariant heap_size >= 0 && heap_size <= k
+        invariant |heap_items| == heap_size
+        invariant position >= 0
+        invariant valid_ranker_ro(r)
+        invariant valid_ssi_ro(ssi)
+        invariant valid_stream(stream)
+        invariant forall i: Int :: { heap_items[i] } 0 <= i && i < heap_size ==> valid_ranked_segment(heap_items[i])
+        invariant forall i: Int, j: Int :: { heap_items[i], heap_items[j] } 0 <= i && i < j && j < heap_size ==> heap_items[i] != heap_items[j]
+    {
+        var chunk: Seq[Int]
+        var bread: Int
+        chunk, bread := stream_read_chunk(stream)
+
+        if (bread == 0) {
+            done := true
+        } else {
+            rolling := rolling ++ chunk
+
+            while (|rolling| >= STREAMING_WINDOW_SIZE())
+                invariant heap_size >= 0 && heap_size <= k
+                invariant |heap_items| == heap_size
+                invariant position >= 0
+                invariant valid_ranker_ro(r)
+                invariant valid_ssi_ro(ssi)
+                invariant forall i: Int :: { heap_items[i] } 0 <= i && i < heap_size ==> valid_ranked_segment(heap_items[i])
+                invariant forall i: Int, j: Int :: { heap_items[i], heap_items[j] } 0 <= i && i < j && j < heap_size ==> heap_items[i] != heap_items[j]
+            {
+                var window: Seq[Int] := rolling[..STREAMING_WINDOW_SIZE()]
+                var sc: Int := score_sequence(r, window, ssi)
+
+                if (fp_is_valid(sc)) {
+                    if (heap_size < k) {
+                        var seg: Ref := create_ranked_segment(window, sc, position, false)
+                        heap_items := heap_items ++ Seq(seg)
+                        heap_size := heap_size + 1
+                    } else {
+                        var mi: Int := find_min_score_idx(heap_items, heap_size)
+                        unfold valid_ranked_segment(heap_items[mi])
+                        var ms: Int := heap_items[mi].seg_score
+                        fold valid_ranked_segment(heap_items[mi])
+                        if (sc > ms) {
+                            var new_seg: Ref := create_ranked_segment(window, sc, position, false)
+                            heap_items := heap_items[mi := new_seg]
+                        }
+                    }
+                }
+
+                var shift: Int := int_max(int_min(|rolling|, STREAMING_WINDOW_SIZE() / 4), 1)
+                rolling := rolling[shift..]
+                position := position + shift
+            }
+        }
+    }
+
+    if (|rolling| > 0) {
+        var sc: Int := score_sequence(r, rolling, ssi)
+        if (fp_is_valid(sc)) {
+            if (heap_size < k) {
+                var seg: Ref := create_ranked_segment(rolling, sc, position, false)
+                heap_items := heap_items ++ Seq(seg)
+                heap_size := heap_size + 1
+            } else {
+                var mi: Int := find_min_score_idx(heap_items, heap_size)
+                unfold valid_ranked_segment(heap_items[mi])
+                var ms: Int := heap_items[mi].seg_score
+                fold valid_ranked_segment(heap_items[mi])
+                if (sc > ms) {
+                    var new_seg: Ref := create_ranked_segment(rolling, sc, position, false)
+                    heap_items := heap_items[mi := new_seg]
+                }
+            }
+        }
+    }
+
+    result := sort_segments_desc(heap_items, heap_size)
+}
+
+method parallel_score(r: Ref, sequences: Seq[Seq[Int]], ssi: Ref, num_threads: Int) returns (scores: Seq[Int])
+    requires valid_ranker_ro(r)
+    requires valid_ssi_ro(ssi)
+    requires num_threads >= 0
+    ensures valid_ranker_ro(r)
+    ensures valid_ssi_ro(ssi)
+    ensures |scores| == |sequences|
+    ensures forall i: Int :: { scores[i] } 0 <= i && i < |scores| ==> score_is_normalized(scores[i])
+{
+    var seq_len: Int := |sequences|
+    if (seq_len == 0) {
+        scores := Seq[Int]()
+        return
+    }
+
+    scores := Seq[Int]()
+    var pi: Int := 0
+    while (pi < seq_len)
+        invariant 0 <= pi && pi <= seq_len
+        invariant |scores| == pi
+        invariant forall j: Int :: { scores[j] } 0 <= j && j < pi ==> score_is_normalized(scores[j])
+        invariant valid_ranker_ro(r)
+        invariant valid_ssi_ro(ssi)
+    {
+        var sc: Int := score_sequence(r, sequences[pi], ssi)
+        scores := scores ++ Seq(sc)
+        pi := pi + 1
+    }
+}
+
+method calibrate_weights(r: Ref, training_data: Seq[Seq[Int]], labels: Seq[Int], ssi: Ref, epochs: Int)
+    requires valid_ranker(r)
+    requires valid_ssi_ro(ssi)
+    requires |training_data| == |labels|
+    requires |training_data| > 0
+    requires epochs >= 0
+    requires forall i: Int :: { labels[i] } 0 <= i && i < |labels| ==> fp_is_valid(labels[i])
+    ensures valid_ranker(r)
+    ensures valid_ssi_ro(ssi)
+{
+    var data_len: Int := |training_data|
+
+    unfold valid_ranker(r)
+    var ngram_len: Int := r.ngram_weights_len
+    var sd: Int := r.ranker_seed
+    var num_ng: Int := r.num_ngrams
+    fold valid_ranker(r)
+
+    var epoch: Int := 0
+    while (epoch < epochs)
+        invariant 0 <= epoch && epoch <= epochs
+        invariant valid_ranker(r)
+        invariant valid_ssi_ro(ssi)
+    {
+        var gradients: Seq[Int] := Seq[Int]()
+        var gi: Int := 0
+        while (gi < ngram_len)
+            invariant 0 <= gi && gi <= ngram_len
+            invariant |gradients| == gi
+            invariant forall j: Int :: { gradients[j] } 0 <= j && j < gi ==> fp_is_valid(gradients[j])
+        {
+            gradients := gradients ++ Seq(fp_zero())
+            gi := gi + 1
+        }
+
+        unfold valid_ranker(r)
+        fold valid_ranker_ro(r)
+
+        var di: Int := 0
+        while (di < data_len)
+            invariant 0 <= di && di <= data_len
+            invariant |gradients| == ngram_len
+            invariant forall j: Int :: { gradients[j] } 0 <= j && j < ngram_len ==> fp_is_valid(gradients[j])
+            invariant valid_ranker_ro(r)
+            invariant valid_ssi_ro(ssi)
+        {
+            var pred: Int := score_sequence(r, training_data[di], ssi)
+            var label: Int := labels[di]
+
+            if (fp_is_valid(pred) && fp_is_valid(label)) {
+                var err_val: Int := fp_sub(pred, label)
+                if (fp_is_valid(err_val)) {
+                    unfold valid_ranker_ro(r)
+                    unfold valid_ssi_ro(ssi)
+                    var wts: Seq[Int] := r.ngram_weights
+                    var entries: Map[Int, Ref] := ssi.ssi_entries
+                    var cur_sd: Int := r.ranker_seed
+                    var cur_ng: Int := r.num_ngrams
+                    fold valid_ssi_ro(ssi)
+                    fold valid_ranker_ro(r)
+
+                    var toks: Seq[Int] := training_data[di]
+                    var toks_len: Int := |toks|
+
+                    var gram: Int := 1
+                    var gram_upper: Int := int_min(cur_ng, toks_len) + 1
+                    while (gram < gram_upper)
+                        invariant 1 <= gram && gram <= gram_upper
+                        invariant |gradients| == ngram_len
+                        invariant forall j: Int :: { gradients[j] } 0 <= j && j < ngram_len ==> fp_is_valid(gradients[j])
+                    {
+                        var start: Int := 0
+                        var eb: Int := toks_len - gram + 1
+                        while (start < eb)
+                            invariant 0 <= start && start <= eb
+                            invariant |gradients| == ngram_len
+                            invariant forall j: Int :: { gradients[j] } 0 <= j && j < ngram_len ==> fp_is_valid(gradients[j])
+                        {
+                            var h: Int := ngram_hash(toks, start, gram, cur_sd)
+                            if (h in domain(entries)) {
+                                var seg_ref: Ref := entries[h]
+                                var seg_scr: Int := get_ssi_entry_score(seg_ref)
+                                if (fp_is_valid(seg_scr)) {
+                                    var widx: Int := int_min(gram - 1, ngram_len - 1)
+                                    var grad_contrib: Int := fp_mul(err_val, seg_scr)
+                                    if (fp_is_valid(grad_contrib)) {
+                                        var old_grad: Int := gradients[widx]
+                                        var new_grad: Int := fp_add(old_grad, grad_contrib)
+                                        if (!fp_is_valid(new_grad)) {
+                                            new_grad := old_grad
+                                        }
+                                        gradients := gradients[widx := new_grad]
+                                    }
+                                }
+                            }
+                            start := start + 1
+                        }
+                        gram := gram + 1
+                    }
+                }
+            }
+            di := di + 1
+        }
+
+        var n_samples_fp: Int := fp_from_int(data_len)
+        var scaled_gradients: Seq[Int] := Seq[Int]()
+        var si: Int := 0
+        while (si < ngram_len)
+            invariant 0 <= si && si <= ngram_len
+            invariant |scaled_gradients| == si
+            invariant forall j: Int :: { scaled_gradients[j] } 0 <= j && j < si ==> fp_is_valid(scaled_gradients[j])
+            invariant |gradients| == ngram_len
+        {
+            var g: Int := gradients[si]
+            var avg_g: Int := fp_div(g, n_samples_fp)
+            if (!fp_is_valid(avg_g)) {
+                avg_g := fp_zero()
+            }
+            var lr_g: Int := fp_mul(avg_g, LEARNING_RATE())
+            if (!fp_is_valid(lr_g)) {
+                lr_g := fp_zero()
+            }
+            scaled_gradients := scaled_gradients ++ Seq(lr_g)
+            si := si + 1
+        }
+
+        unfold valid_ranker_ro(r)
+        fold valid_ranker(r)
+
+        update_weights(r, scaled_gradients)
+
+        epoch := epoch + 1
+    }
+}
+
+field model_version: Int
+field model_num_weights: Int
+field model_num_ngrams: Int
+field model_weights: Seq[Int]
+field model_num_hash_funcs: Int
+field model_hash_params: Seq[Int]
+field model_seed: Int
+
+predicate valid_model_file(m: Ref) {
+    acc(m.model_version) &&
+    acc(m.model_num_weights) &&
+    acc(m.model_num_ngrams) &&
+    acc(m.model_weights) &&
+    acc(m.model_num_hash_funcs) &&
+    acc(m.model_hash_params) &&
+    acc(m.model_seed) &&
+    m.model_version == 2 &&
+    m.model_num_weights > 0 &&
+    m.model_num_ngrams > 0 &&
+    m.model_num_hash_funcs > 0 &&
+    |m.model_weights| == m.model_num_weights &&
+    |m.model_hash_params| == m.model_num_hash_funcs * 2 &&
+    (forall i: Int :: { m.model_weights[i] }
+        0 <= i && i < m.model_num_weights ==> fp_is_valid(m.model_weights[i]))
+}
+
+method export_model(r: Ref) returns (m: Ref)
+    requires valid_ranker_ro(r)
+    ensures valid_ranker_ro(r)
+    ensures valid_model_file(m)
+    ensures unfolding valid_model_file(m) in m.model_version == 2
+    ensures unfolding valid_ranker_ro(r) in
+        unfolding valid_model_file(m) in
+            m.model_num_weights == r.ngram_weights_len &&
+            m.model_num_ngrams == r.num_ngrams &&
+            m.model_num_hash_funcs == r.num_hash_functions &&
+            m.model_seed == r.ranker_seed &&
+            m.model_weights == r.ngram_weights &&
+            m.model_hash_params == r.lsh_hash_params
+{
+    unfold valid_ranker_ro(r)
+
+    m := new(model_version, model_num_weights, model_num_ngrams, model_weights, model_num_hash_funcs, model_hash_params, model_seed)
+    m.model_version := 2
+    m.model_num_weights := r.ngram_weights_len
+    m.model_num_ngrams := r.num_ngrams
+    m.model_weights := r.ngram_weights
+    m.model_num_hash_funcs := r.num_hash_functions
+    m.model_hash_params := r.lsh_hash_params
+    m.model_seed := r.ranker_seed
+
+    fold valid_ranker_ro(r)
+    fold valid_model_file(m)
+}
+
+method import_model(r: Ref, m: Ref)
+    requires valid_ranker(r)
+    requires valid_model_file(m)
+    ensures valid_ranker(r)
+    ensures valid_model_file(m)
+    ensures unfolding valid_ranker(r) in
+        unfolding valid_model_file(m) in
+            r.ngram_weights == m.model_weights &&
+            r.ngram_weights_len == m.model_num_weights &&
+            r.num_ngrams == m.model_num_ngrams &&
+            r.num_hash_functions == m.model_num_hash_funcs &&
+            r.lsh_hash_params == m.model_hash_params &&
+            r.lsh_hash_params_len == m.model_num_hash_funcs * 2 &&
+            r.ranker_seed == m.model_seed
+{
+    unfold valid_ranker(r)
+    unfold valid_model_file(m)
+
+    r.ngram_weights := m.model_weights
+    r.ngram_weights_len := m.model_num_weights
+    r.num_ngrams := m.model_num_ngrams
+    r.num_hash_functions := m.model_num_hash_funcs
+    r.lsh_hash_params := m.model_hash_params
+    r.lsh_hash_params_len := m.model_num_hash_funcs * 2
+    r.ranker_seed := m.model_seed
+
+    fold valid_model_file(m)
+    fold valid_ranker(r)
+}
+
+method bitset_init(capacity: Int) returns (b: Ref)
+    requires capacity > 0
+    ensures valid_bitset(b)
+    ensures unfolding valid_bitset(b) in b.bitset_capacity == capacity
+{
+    b := new(bitset_words, bitset_words_len, bitset_capacity)
+    var words_needed: Int := (capacity + 63) / 64
+    if (words_needed <= 0) {
+        words_needed := 1
+    }
+
+    var ws: Seq[Int] := Seq[Int]()
+    var wi: Int := 0
+    while (wi < words_needed)
+        invariant 0 <= wi && wi <= words_needed
+        invariant |ws| == wi
+        invariant acc(b.bitset_words)
+        invariant acc(b.bitset_words_len)
+        invariant acc(b.bitset_capacity)
+    {
+        ws := ws ++ Seq(0)
+        wi := wi + 1
+    }
+
+    b.bitset_words := ws
+    b.bitset_words_len := words_needed
+    b.bitset_capacity := capacity
+    fold valid_bitset(b)
+}
+
+method bitset_set(b: Ref, index: Int)
+    requires valid_bitset(b)
+    requires index >= 0
+    requires unfolding valid_bitset(b) in index < b.bitset_capacity
+    ensures valid_bitset(b)
+{
+    unfold valid_bitset(b)
+    var word_idx: Int := index / 64
+    var bit_idx: Int := index % 64
+    var mask: Int := left_shift(1, bit_idx)
+    var old_word: Int := b.bitset_words[word_idx]
+    var new_word: Int := bitwise_or(old_word, mask)
+    b.bitset_words := b.bitset_words[word_idx := new_word]
+    fold valid_bitset(b)
+}
+
+method bitset_get(b: Ref, index: Int) returns (is_set: Bool)
+    requires valid_bitset_ro(b)
+    requires index >= 0
+    requires unfolding valid_bitset_ro(b) in index < b.bitset_capacity
+    ensures valid_bitset_ro(b)
+{
+    unfold valid_bitset_ro(b)
+    var word_idx: Int := index / 64
+    var bit_idx: Int := index % 64
+    var mask: Int := left_shift(1, bit_idx)
+    var word: Int := b.bitset_words[word_idx]
+    is_set := bitwise_and(word, mask) != 0
+    fold valid_bitset_ro(b)
+}
+
+method bitset_deinit(b: Ref)
+    requires valid_bitset(b)
+{
+    unfold valid_bitset(b)
+}
+
+method tensor_init(shape: Seq[Int]) returns (t: Ref)
+    requires |shape| > 0
+    requires forall i: Int :: { shape[i] } 0 <= i && i < |shape| ==> shape[i] > 0
+    ensures valid_tensor(t)
+    ensures unfolding valid_tensor(t) in t.tensor_rank == |shape|
+    ensures unfolding valid_tensor(t) in t.tensor_shape == shape
+{
+    t := new(tensor_data, tensor_data_len, tensor_shape, tensor_rank)
+    t.tensor_rank := |shape|
+    t.tensor_shape := shape
+
+    var total: Int := 1
+    var si: Int := 0
+    while (si < |shape|)
+        invariant 0 <= si && si <= |shape|
+        invariant total >= 1
+        invariant acc(t.tensor_data)
+        invariant acc(t.tensor_data_len)
+        invariant acc(t.tensor_shape)
+        invariant acc(t.tensor_rank)
+    {
+        total := total * shape[si]
+        si := si + 1
+    }
+
+    var data: Seq[Int] := Seq[Int]()
+    var di: Int := 0
+    while (di < total)
+        invariant 0 <= di && di <= total
+        invariant |data| == di
+        invariant forall j: Int :: { data[j] } 0 <= j && j < di ==> data[j] == fp_zero()
+        invariant acc(t.tensor_data)
+        invariant acc(t.tensor_data_len)
+        invariant acc(t.tensor_shape)
+        invariant acc(t.tensor_rank)
+    {
+        data := data ++ Seq(fp_zero())
+        di := di + 1
+    }
+
+    t.tensor_data := data
+    t.tensor_data_len := total
+    fold valid_tensor(t)
+}
+
+method tensor_deinit(t: Ref)
+    requires valid_tensor(t)
+{
+    unfold valid_tensor(t)
+}
+
+method ssi_init() returns (s: Ref)
+    ensures valid_ssi(s)
+    ensures unfolding valid_ssi(s) in s.ssi_size == 0
+{
+    s := new(ssi_entries, ssi_size)
+    var empty_map: Map[Int, Ref] := Map[Int, Ref]()
+    s.ssi_entries := empty_map
+    s.ssi_size := 0
+    fold valid_ssi(s)
+}
+
+method ssi_add_sequence(s: Ref, tokens: Seq[Int], position: Int, anchor: Bool)
+    requires valid_ssi(s)
+    requires |tokens| > 0
+    requires position >= 0
+    ensures valid_ssi(s)
+    ensures unfolding valid_ssi(s) in s.ssi_size >= old(unfolding valid_ssi(s) in s.ssi_size)
+{
+    unfold valid_ssi(s)
+
+    var entry: Ref := new(ssi_entry_score, ssi_entry_position, ssi_entry_anchor, ssi_entry_anchor_hash)
+    entry.ssi_entry_score := fp_one()
+    entry.ssi_entry_position := position
+    entry.ssi_entry_anchor := anchor
+    if (anchor) {
+        entry.ssi_entry_anchor_hash := stable_hash(tokens_to_le_bytes(tokens), 42)
+    } else {
+        entry.ssi_entry_anchor_hash := 0
+    }
+    fold valid_ssi_entry(entry)
+
+    var le_bytes: Seq[Int] := tokens_to_le_bytes(tokens)
+    var h: Int := stable_hash(le_bytes, 0)
+
+    unfold valid_ssi_entry(entry)
+    s.ssi_entries := s.ssi_entries[h := entry]
+    s.ssi_size := s.ssi_size + 1
+    fold valid_ssi_entry(entry)
+
+    fold valid_ssi(s)
+}
+
+method ssi_deinit(s: Ref)
+    requires valid_ssi(s)
+{
+    unfold valid_ssi(s)
+}
+
+method ranked_segment_init(tokens: Seq[Int], score: Int, position: Int, anchor: Bool) returns (seg: Ref)
+    requires fp_is_valid(score)
+    requires position >= 0
+    ensures valid_ranked_segment(seg)
+    ensures unfolding valid_ranked_segment(seg) in
+        seg.seg_tokens == tokens &&
+        seg.seg_tokens_len == |tokens| &&
+        seg.seg_score == score &&
+        seg.seg_position == position &&
+        seg.seg_anchor == anchor
+{
+    seg := create_ranked_segment(tokens, score, position, anchor)
+}
+
+method ranked_segment_deinit(seg: Ref)
+    requires valid_ranked_segment(seg)
+{
+    unfold valid_ranked_segment(seg)
+}
+
+method test_ranker_score()
+{
+    var r: Ref := ranker_init(4, 8, 42)
+    var ssi: Ref := ssi_init()
+    ssi_add_sequence(ssi, Seq(1, 2, 3), 0, false)
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+    unfold valid_ssi(ssi)
+    fold valid_ssi_ro(ssi)
+
+    var score: Int := score_sequence(r, Seq(1, 2), ssi)
+    assert score >= fp_zero()
+    assert score <= fp_one()
+    assert fp_is_valid(score)
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    unfold valid_ssi_ro(ssi)
+    fold valid_ssi(ssi)
+
+    ranker_deinit(r)
+    ssi_deinit(ssi)
+}
+
+method test_minhash_deterministic()
+{
+    var r: Ref := ranker_init(1, 32, 42)
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+
+    var sig1: Seq[Int] := min_hash_signature(r, Seq(1, 2, 3))
+    var sig2: Seq[Int] := min_hash_signature(r, Seq(1, 2, 3))
+
+    assert |sig1| == |sig2|
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    ranker_deinit(r)
+}
+
+method test_jaccard_from_signatures()
+{
+    var r: Ref := ranker_init(1, 32, 42)
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+
+    var sig1: Seq[Int] := min_hash_signature(r, Seq(1, 2, 3))
+    var sig2: Seq[Int] := min_hash_signature(r, Seq(1, 2, 3))
+
+    var sim: Int := jaccard_similarity_from_signatures(sig1, sig2)
+    assert sim >= fp_zero()
+    assert sim <= fp_one()
+    assert fp_is_valid(sim)
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    ranker_deinit(r)
+}
+
+method test_token_diversity()
+{
+    var r: Ref := ranker_init(1, 1, 42)
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+
+    var div1: Int := compute_token_diversity(r, Seq(1, 1, 1, 1))
+    var div2: Int := compute_token_diversity(r, Seq(1, 2, 3, 4))
+
+    assert div1 >= fp_zero() && div1 <= fp_one()
+    assert div2 >= fp_zero() && div2 <= fp_one()
+    assert fp_is_valid(div1) && fp_is_valid(div2)
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    ranker_deinit(r)
+}
+
+method test_token_overlap()
+{
+    var r: Ref := ranker_init(1, 1, 42)
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+
+    var overlap: Int := compute_token_overlap(r, Seq(1, 2, 3), Seq(2, 3, 4))
+    assert overlap >= fp_zero() && overlap <= fp_one()
+    assert fp_is_valid(overlap)
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    ranker_deinit(r)
+}
+
+method test_estimate_jaccard()
+{
+    var set1: Ref := bitset_init(128)
+    bitset_set(set1, 0)
+    bitset_set(set1, 64)
+    var set2: Ref := bitset_init(128)
+    bitset_set(set2, 0)
+
+    unfold valid_bitset(set1)
+    fold valid_bitset_ro(set1)
+    unfold valid_bitset(set2)
+    fold valid_bitset_ro(set2)
+
+    var est: Int := estimate_jaccard(set1, set2)
+    assert est >= fp_zero() && est <= fp_one()
+    assert fp_is_valid(est)
+
+    unfold valid_bitset_ro(set1)
+    fold valid_bitset(set1)
+    unfold valid_bitset_ro(set2)
+    fold valid_bitset(set2)
+
+    bitset_deinit(set1)
+    bitset_deinit(set2)
+}
+
+method test_estimate_jaccard_empty()
+{
+    var set1: Ref := bitset_init(64)
+    var set2: Ref := bitset_init(64)
+
+    unfold valid_bitset(set1)
+    fold valid_bitset_ro(set1)
+    unfold valid_bitset(set2)
+    fold valid_bitset_ro(set2)
+
+    var est: Int := estimate_jaccard(set1, set2)
+    assert est == fp_one()
+
+    unfold valid_bitset_ro(set1)
+    fold valid_bitset(set1)
+    unfold valid_bitset_ro(set2)
+    fold valid_bitset(set2)
+
+    bitset_deinit(set1)
+    bitset_deinit(set2)
+}
+
+method test_vector_cosine_score()
+{
+    var emb: Ref := tensor_init(Seq(3))
+    var qemb: Ref := tensor_init(Seq(3))
+
+    unfold valid_tensor(emb)
+    fold valid_tensor_ro(emb)
+    unfold valid_tensor(qemb)
+    fold valid_tensor_ro(qemb)
+
+    var score: Int := vector_score(emb, qemb)
+    assert score >= fp_neg_one() && score <= fp_one()
+    assert fp_is_valid(score)
+
+    unfold valid_tensor_ro(emb)
+    fold valid_tensor(emb)
+    unfold valid_tensor_ro(qemb)
+    fold valid_tensor(qemb)
+
+    tensor_deinit(emb)
+    tensor_deinit(qemb)
+}
+
+method test_dot_product_score()
+{
+    var emb: Ref := tensor_init(Seq(3))
+    var qemb: Ref := tensor_init(Seq(3))
+
+    unfold valid_tensor(emb)
+    fold valid_tensor_ro(emb)
+    unfold valid_tensor(qemb)
+    fold valid_tensor_ro(qemb)
+
+    var score: Int := dot_product_score(emb, qemb)
+    assert fp_is_valid(score)
+
+    unfold valid_tensor_ro(emb)
+    fold valid_tensor(emb)
+    unfold valid_tensor_ro(qemb)
+    fold valid_tensor(qemb)
+
+    tensor_deinit(emb)
+    tensor_deinit(qemb)
+}
+
+method test_weighted_average()
+{
+    var scores: Seq[Int] := Seq(fp_half(), fp_mul(fp_from_int(4), fp_div(fp_one(), fp_from_int(5))), fp_point_three())
+    var weights: Seq[Int] := Seq(fp_one(), fp_mul(fp_from_int(2), fp_one()), fp_one())
+    var avg: Int := weighted_average(scores, weights)
+    assert fp_is_valid(avg)
+}
+
+method test_exponential_decay()
+{
+    var scores: Seq[Int] := Seq(fp_one(), fp_one(), fp_one(), fp_one())
+    var decay: Int := fp_mul(fp_from_int(9), fp_div(fp_one(), fp_from_int(10)))
+    var decayed: Seq[Int] := exponential_decay(scores, decay)
+    assert |decayed| == 4
+    assert fp_is_valid(decayed[0])
+    assert fp_is_valid(decayed[1])
+    assert fp_is_valid(decayed[2])
+    assert fp_is_valid(decayed[3])
+}
+
+method test_normalize_scores()
+{
+    var scores: Seq[Int] := Seq(fp_from_int(10), fp_from_int(20), fp_from_int(30), fp_from_int(40))
+    var normed: Seq[Int] := normalize_scores_static(scores)
+    assert |normed| == 4
+    assert fp_is_valid(normed[0])
+    assert fp_is_valid(normed[3])
+}
+
+method test_export_import_model()
+{
+    var r: Ref := ranker_init(4, 8, 42)
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+
+    var m: Ref := export_model(r)
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+
+    var r2: Ref := ranker_init(2, 4, 0)
+    import_model(r2, m)
+
+    unfold valid_ranker(r2)
+    unfold valid_model_file(m)
+    assert r2.num_ngrams == m.model_num_ngrams
+    assert r2.num_hash_functions == m.model_num_hash_funcs
+    assert r2.ranker_seed == m.model_seed
+    assert r2.ngram_weights == m.model_weights
+    assert r2.lsh_hash_params == m.model_hash_params
+    fold valid_model_file(m)
+    fold valid_ranker(r2)
+
+    ranker_deinit(r)
+    ranker_deinit(r2)
+}
+
+method test_score_with_query()
+{
+    var r: Ref := ranker_init(4, 8, 42)
+    var ssi: Ref := ssi_init()
+    ssi_add_sequence(ssi, Seq(1, 2, 3), 0, false)
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+    unfold valid_ssi(ssi)
+    fold valid_ssi_ro(ssi)
+
+    var score: Int := score_sequence_with_query(r, Seq(1, 2), Seq(2, 3), ssi)
+    assert score >= fp_zero()
+    assert score <= fp_one()
+    assert fp_is_valid(score)
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    unfold valid_ssi_ro(ssi)
+    fold valid_ssi(ssi)
+
+    ranker_deinit(r)
+    ssi_deinit(ssi)
+}
+
+method test_batch_score()
+{
+    var r: Ref := ranker_init(4, 8, 42)
+    var ssi: Ref := ssi_init()
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+    unfold valid_ssi(ssi)
+    fold valid_ssi_ro(ssi)
+
+    var seqs: Seq[Seq[Int]] := Seq(Seq(1, 2), Seq(3, 4), Seq(5, 6))
+    var scores: Seq[Int] := batch_score(r, seqs, ssi)
+    assert |scores| == 3
+    assert score_is_normalized(scores[0])
+    assert score_is_normalized(scores[1])
+    assert score_is_normalized(scores[2])
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    unfold valid_ssi_ro(ssi)
+    fold valid_ssi(ssi)
+
+    ranker_deinit(r)
+    ssi_deinit(ssi)
+}
+
+method test_update_weights()
+{
+    var r: Ref := ranker_init(4, 8, 42)
+
+    unfold valid_ranker(r)
+    var old_w0: Int := r.ngram_weights[0]
+    fold valid_ranker(r)
+
+    var grads: Seq[Int] := Seq(fp_point_zero_one(), fp_point_zero_one(), fp_point_zero_one(), fp_point_zero_one())
+    update_weights(r, grads)
+
+    unfold valid_ranker(r)
+    assert r.ngram_weights[0] >= fp_zero()
+    assert r.ngram_weights[0] <= fp_one()
+    fold valid_ranker(r)
+
+    ranker_deinit(r)
+}
+
+method test_empty_sequence_score()
+{
+    var r: Ref := ranker_init(4, 8, 42)
+    var ssi: Ref := ssi_init()
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+    unfold valid_ssi(ssi)
+    fold valid_ssi_ro(ssi)
+
+    var score: Int := score_sequence(r, Seq[Int](), ssi)
+    assert score == fp_zero()
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    unfold valid_ssi_ro(ssi)
+    fold valid_ssi(ssi)
+
+    ranker_deinit(r)
+    ssi_deinit(ssi)
+}
+
+method test_jaccard_empty_inputs()
+{
+    var r: Ref := ranker_init(1, 1, 42)
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+
+    var j1: Int := compute_jaccard_similarity(r, Seq[Int](), Seq[Int]())
+    assert j1 == fp_one()
+
+    var j2: Int := compute_jaccard_similarity(r, Seq(1, 2), Seq[Int]())
+    assert j2 == fp_zero()
+
+    var j3: Int := compute_jaccard_similarity(r, Seq[Int](), Seq(1, 2))
+    assert j3 == fp_zero()
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    ranker_deinit(r)
+}
+
+method test_parallel_score()
+{
+    var r: Ref := ranker_init(4, 8, 42)
+    var ssi: Ref := ssi_init()
+
+    unfold valid_ranker(r)
+    fold valid_ranker_ro(r)
+    unfold valid_ssi(ssi)
+    fold valid_ssi_ro(ssi)
+
+    var seqs: Seq[Seq[Int]] := Seq(Seq(1, 2, 3), Seq(4, 5, 6))
+    var scores: Seq[Int] := parallel_score(r, seqs, ssi, 4)
+    assert |scores| == 2
+    assert score_is_normalized(scores[0])
+    assert score_is_normalized(scores[1])
+
+    unfold valid_ranker_ro(r)
+    fold valid_ranker(r)
+    unfold valid_ssi_ro(ssi)
+    fold valid_ssi(ssi)
+
+    ranker_deinit(r)
+    ssi_deinit(ssi)
+}

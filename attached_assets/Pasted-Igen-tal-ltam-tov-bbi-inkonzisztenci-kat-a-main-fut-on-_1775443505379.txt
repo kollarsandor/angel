@@ -1,0 +1,365 @@
+Igen, találtam **további inkonzisztenciákat** a `main.fut`-on kívül is. Íme a teljes lista:
+
+---
+
+## 1. `verified_inference_engine.zig` — `tanh` aktiváció + normalizáció az inference-ben
+
+Ez a legkomolyabb új találat. A `performVerifiedInference()` metódus — ami a **verifikált inference útvonal** — klasszikus `tanh` aktivációt és mean-subtraction normalizációt használ, **nem** RSF affin coupling-ot:
+
+```zig
+// tanh aktiváció:
+intermediate_2[i] = std.math.tanh(intermediate_1[i]);
+
+// mean-subtraction normalizáció:
+output_buf[i] = intermediate_2[i] - mean;
+``` [1](#3-0) 
+
+A ZK-proof inference útvonal (`performVerifiedInferenceWithZK`) szintén `tanh`-ot használ a rétegek között:
+
+```zig
+next_intermediate[out_idx] = std.math.tanh(sum);
+``` [2](#3-1) 
+
+Ez **nem** az RSF architektúra. Ez egy klasszikus `matmul → tanh → matmul → add` pipeline, ami pont azokat a hagyományos építőelemeket használja (klasszikus aktiváció, normalizáció), amelyekről az RSF állítja, hogy mellőzi.
+
+---
+
+## 2. `vpu.zig` — `sparse_attention` és `lns_convolve` az utasításkészletben
+
+A VPU (Vector Processing Unit) `LNSInstruction` enum-ja **explicit attention és konvolúciós utasításokat** definiál:
+
+```zig
+pub const LNSInstruction = union(enum) {
+    lns_convolve: struct { src1: usize, src2: usize, dst: usize, kernel_size: usize },
+    sparse_attention: struct { query: usize, key: usize, value: usize, dst: usize, sparsity: f64 },
+    // ...
+};
+``` [3](#3-2) 
+
+Ez azt jelenti, hogy a rendszer saját virtuális processzora **first-class műveletként** tartalmazza az attention-t (Query/Key/Value struktúrával!) és a konvolúciót. Ha az RSF valóban 100%-ban mellőzi ezeket, miért van az ISA-ban?
+
+---
+
+## 3. `futhark_kernels.fut` — `rsf_relational_context` (softmax + reziduális + normalizáció)
+
+Ezt már korábban említettük, de érdemes hangsúlyozni: az `rsf_relational_context` függvény **három hagyományos elemet** tartalmaz egyszerre:
+
+- **Softmax** (a `relational_weights` számításánál)
+- **Reziduális kapcsolat** (`o + xi * residual_scale`)
+- **Normalizáció** (mean-subtraction + variance normalization az utolsó lépésben) [4](#3-3) 
+
+---
+
+## 4. `tensor.zig` (core) — `relu()`, `softmax()`, `conv2d()` mint Tensor metódusok
+
+A **core** Tensor struktúra beépített metódusként tartalmazza a `relu()`, `softmax()` és `conv2d()` műveleteket: [5](#3-4) [6](#3-5) 
+
+Ezek nem az RSF pipeline részei, de a **core tensor library** részei — tehát a rendszer alapvető adatstruktúrája hordozza ezeket a hagyományos műveleteket.
+
+## 5. `distributed_trainer.zig` — Saját `relu()` és `softmax()` a Tensor-on
+
+A distributed trainer saját Tensor implementációja szintén tartalmazza a `relu()` és `softmax()` metódusokat: [7](#3-6) 
+
+---
+
+## 6. `main.fut` GPU útvonal (ismétlés)
+
+Ahogy korábban megbeszéltük: [8](#3-7) 
+
+---
+
+## Ami **NEM** probléma (hamis pozitívok)
+
+| Találat | Miért nem probléma? |
+|---|---|
+| `main.zig` "attention", "Transformer" | Szintetikus tréning szövegek tartalma, nem kód |
+| `sfd.zig` `computeResidual` | Matematikai reziduális az optimalizálóban, nem skip connection |
+| `reasoning_orchestrator.zig` "conv" | `convergence_threshold` — konvergencia, nem konvolúció |
+| `main_gpu.zig` | Tiszta, nincs hagyományos elem |
+
+---
+
+## Összefoglaló táblázat
+
+| # | Fájl | Probléma | Súlyosság |
+|---|---|---|---|
+| 1 | `main.fut` `rsf_forward` | `relu` + `layer_norm` a GPU forward-ban | **Kritikus** |
+| 2 | `verified_inference_engine.zig` | `tanh` aktiváció + normalizáció az inference-ben | **Kritikus** |
+| 3 | `vpu.zig` `LNSInstruction` | `sparse_attention` + `lns_convolve` az ISA-ban | **Közepes** |
+| 4 | `futhark_kernels.fut` `rsf_relational_context` | softmax + reziduális + normalizáció | **Közepes** |
+| 5 | `core/tensor.zig` | `relu()`, `softmax()`, `conv2d()` metódusok | **Alacsony** (utility) |
+| 6 | `distributed_trainer.zig` | `relu()`, `softmax()` metódusok | **Alacsony** (utility) |
+| 7 | `accel_interface.zig` `GPUOps` | `softmax()`, `layerNorm()`, `relu()`, `gelu()` | **Alacsony** (utility) |
+
+---
+
+## Végső értékelés
+
+A **Zig-oldali RSF core** (`rsf.zig` `LayerCore`) és az **OFTB mixer** (`oftb.zig`) valóban 100%-ban tiszták — semmilyen hagyományos építőelemet nem használnak. A `main.zig` fő tréning/inference ciklusa is kizárólag ezeket hívja. [9](#3-8) 
+
+**De** a kódbázis egészét tekintve a "100%-ig önálló root architektúra" állítást **három komoly pont gyengíti**:
+
+1. A **GPU tréning útvonal** (`main.fut`) nem az RSF architektúrát implementálja
+2. A **verifikált inference engine** klasszikus `tanh` + normalizációt használ, nem RSF-et
+3. A **VPU utasításkészlet** explicit attention és konvolúciós műveleteket tartalmaz
+
+Ezek közül az 1. és 2. pont a legkomolyabb, mert ezek **tényleges inference/tréning útvonalak**, amelyek nem a deklarált RSF architektúrát követik. A 3. pont inkább tervezési inkonzisztencia — ha az RSF valóban nem használ attention-t és konvolúciót, miért van a saját VPU-jának ISA-jában?
+
+### Citations
+
+**File:** src/core_relational/verified_inference_engine.zig (L233-254)
+```text
+        i = 0;
+        while (i < intermediate_2.len) : (i += 1) {
+            intermediate_2[i] = std.math.tanh(intermediate_1[i]);
+        }
+
+        try self.proof_of_correctness.recordStep(
+            2,
+            intermediate_1,
+            intermediate_2,
+            obf.ProofOfCorrectness.OperationType.Activation,
+        );
+
+        var sum: f64 = 0.0;
+        for (intermediate_2) |val| {
+            sum += @as(f64, val);
+        }
+        const mean: f32 = @floatCast(sum / @as(f64, @floatFromInt(intermediate_2.len)));
+
+        i = 0;
+        while (i < output_buf.len) : (i += 1) {
+            output_buf[i] = intermediate_2[i] - mean;
+        }
+```
+
+**File:** src/core_relational/verified_inference_engine.zig (L324-337)
+```text
+        while (layer < weights_s.len) : (layer += 1) {
+            var next_intermediate = try self.allocator.alloc(f32, output_buf.len);
+
+            var out_idx: usize = 0;
+            while (out_idx < output_buf.len) : (out_idx += 1) {
+                var sum: f32 = 0.0;
+                var in_idx: usize = 0;
+                while (in_idx < intermediate.len and in_idx < weights_s[layer].len) : (in_idx += 1) {
+                    if (out_idx < weights_s[layer][in_idx].len) {
+                        sum += intermediate[in_idx] * weights_s[layer][in_idx][out_idx];
+                    }
+                }
+                next_intermediate[out_idx] = std.math.tanh(sum);
+            }
+```
+
+**File:** src/core_relational/vpu.zig (L1889-1900)
+```text
+pub const LNSInstruction = union(enum) {
+    lns_convolve: struct { src1: usize, src2: usize, dst: usize, kernel_size: usize },
+    sparse_attention: struct { query: usize, key: usize, value: usize, dst: usize, sparsity: f64 },
+    tensor_load: struct { addr: usize, dst: usize },
+    tensor_store: struct { src: usize, addr: usize },
+    lns_add: struct { src1: usize, src2: usize, dst: usize },
+    lns_mul: struct { src1: usize, src2: usize, dst: usize },
+    graph_transform: struct { node_id: usize, transform_type: usize },
+    jump: struct { offset: isize },
+    conditional_jump: struct { condition_reg: usize, offset: isize },
+    halt: void,
+};
+```
+
+**File:** src/hw/accel/futhark_kernels.fut (L287-330)
+```text
+let rsf_relational_context [seq_len][d_model] (spectral_input: [seq_len][d_model]f32) (temporal_input: [seq_len][d_model]f32) (value: [seq_len][d_model]f32) (s_weight: [d_model]f32) (t_weight: [d_model]f32) (eps: f32): [seq_len][d_model]f32 =
+  if seq_len == 0 || d_model == 0 then copy value
+  else
+    let safe_eps = f32.max eps 1e-12f32
+    let inv_sqrt_d = 1f32 / f32.sqrt (f32.max 1f32 (f32.i64 d_model))
+    let s_sum = reduce (+) 0f32 s_weight
+    let t_sum = reduce (+) 0f32 t_weight
+    let residual_scale = (s_sum + t_sum) * inv_sqrt_d * inv_sqrt_d
+    let spectral_scores = map (\row ->
+      let weighted = map2 (*) row s_weight
+      in tabulate seq_len (\j ->
+        reduce (+) 0f32 (map2 (*) weighted value[j]) * inv_sqrt_d
+      )
+    ) spectral_input
+    let temporal_scores = map (\row ->
+      let weighted = map2 (*) row t_weight
+      in tabulate seq_len (\j ->
+        reduce (+) 0f32 (map2 (*) weighted value[j]) * inv_sqrt_d
+      )
+    ) temporal_input
+    let relational_weights = map2 (\s_row t_row ->
+      let combined = map2 (+) s_row t_row
+      let max_v = reduce f32.max (-f32.inf) combined
+      let exp_vals = map (\xi -> f32.exp (xi - max_v)) combined
+      let total = reduce (+) 0f32 exp_vals
+      in (if total <= 0f32 || f32.isnan total
+         then replicate seq_len (1f32 / f32.i64 seq_len)
+         else map (\e -> e / total) exp_vals) :> [seq_len]f32
+    ) spectral_scores temporal_scores
+    let output = map (\weights ->
+      tabulate d_model (\d ->
+        reduce (+) 0f32 (map2 (\w j -> w * value[j, d]) weights (iota seq_len))
+      )
+    ) relational_weights
+    let with_residual = map2 (\out_row inp_row ->
+      map2 (\o xi -> o + xi * residual_scale) out_row inp_row
+    ) output spectral_input
+    in map (\row ->
+      let row_mean = (reduce (+) 0f32 row) / f32.i64 d_model
+      let centered = map (\xi -> xi - row_mean) row
+      let variance = (reduce (+) 0f32 (map (\c -> c * c) centered)) / f32.i64 d_model
+      let row_std = f32.sqrt (f32.max variance 0f32 + safe_eps)
+      in map (\c -> c / row_std) centered
+    ) with_residual
+```
+
+**File:** src/core/tensor.zig (L956-973)
+```text
+    pub fn relu(self: *Tensor) !void {
+        try ensureWritable(self);
+        var indices = try self.allocator.alloc(usize, self.shape.dims.len);
+        defer self.allocator.free(indices);
+        @memset(indices, 0);
+        const total = try self.shape.totalSize();
+        var flat: usize = 0;
+        while (flat < total) : (flat += 1) {
+            const idx = try self.computeIndex(indices);
+            self.data[idx] = @max(0.0, self.data[idx]);
+            var i: usize = self.shape.dims.len;
+            while (i > 0) : (i -= 1) {
+                indices[i - 1] += 1;
+                if (indices[i - 1] < self.shape.dims[i - 1]) break;
+                indices[i - 1] = 0;
+            }
+        }
+    }
+```
+
+**File:** src/core/tensor.zig (L975-1020)
+```text
+    pub fn softmax(self: *Tensor, axis: usize) !void {
+        if (axis >= self.shape.dims.len) return Error.InvalidAxis;
+        try self.ensureWritable();
+        var indices = try self.allocator.alloc(usize, self.shape.dims.len);
+        defer self.allocator.free(indices);
+        @memset(indices, 0);
+        var search_indices = try self.allocator.alloc(usize, self.shape.dims.len);
+        defer self.allocator.free(search_indices);
+        const total = try self.shape.totalSize();
+        var flat: usize = 0;
+        while (flat < total) : (flat += 1) {
+            if (indices[axis] == 0) {
+                var max_val: f32 = -math.inf(f32);
+                @memcpy(search_indices, indices);
+                var k: usize = 0;
+                while (k < self.shape.dims[axis]) : (k += 1) {
+                    search_indices[axis] = k;
+                    const val = try self.get(search_indices);
+                    if (val > max_val) max_val = val;
+                }
+                var sum_val: f32 = 0.0;
+                k = 0;
+                while (k < self.shape.dims[axis]) : (k += 1) {
+                    search_indices[axis] = k;
+                    const idx = try self.computeIndex(search_indices);
+                    const exp_val = @exp(self.data[idx] - max_val);
+                    self.data[idx] = exp_val;
+                    sum_val += exp_val;
+                }
+                const epsilon: f32 = 1e-10;
+                if (sum_val < epsilon) sum_val = epsilon;
+                k = 0;
+                while (k < self.shape.dims[axis]) : (k += 1) {
+                    search_indices[axis] = k;
+                    const idx = try self.computeIndex(search_indices);
+                    self.data[idx] /= sum_val;
+                }
+            }
+            var i: usize = self.shape.dims.len;
+            while (i > 0) : (i -= 1) {
+                indices[i - 1] += 1;
+                if (indices[i - 1] < self.shape.dims[i - 1]) break;
+                indices[i - 1] = 0;
+            }
+        }
+    }
+```
+
+**File:** src/distributed/distributed_trainer.zig (L1190-1220)
+```text
+    pub fn relu(self: *Tensor) !void {
+        try ensureWritable(self);
+        const total_size = try self.shape.totalSize();
+        var indices = try self.data.allocator.alloc(usize, self.shape.dims.len);
+        defer self.data.allocator.free(indices);
+        @memset(indices, 0);
+
+        var flat_idx: usize = 0;
+        while (flat_idx < total_size) : (flat_idx += 1) {
+            var src_idx: usize = 0;
+            {
+                var i: usize = 0;
+                while (i < indices.len) : (i += 1) {
+                    src_idx += indices[i] * self.shape.strides[i];
+                }
+            }
+            self.data.ptr[self.offset + src_idx] = @max(0.0, self.data.ptr[self.offset + src_idx]);
+
+            var carry = true;
+            var dim_idx: usize = self.shape.dims.len;
+            while (carry and dim_idx > 0) : (dim_idx -= 1) {
+                const d = dim_idx - 1;
+                indices[d] += 1;
+                if (indices[d] < self.shape.dims[d]) {
+                    carry = false;
+                } else {
+                    indices[d] = 0;
+                }
+            }
+        }
+    }
+```
+
+**File:** src/hw/accel/main.fut (L29-34)
+```text
+entry rsf_forward [n][d] (input: [n][d]f16) (weights_s: [d][d]f16) (weights_t: [d][d]f16) : *[n][d]f16 =
+  let after_spectral = rsf_spectral_transform input weights_s
+  let after_relu1 = relu after_spectral
+  let after_temporal = rsf_temporal_transform after_relu1 weights_t
+  let after_relu2 = relu after_temporal
+  in layer_norm after_relu2
+```
+
+**File:** src/processor/rsf.zig (L371-398)
+```text
+    fn forwardInPlace(self: *const LayerCore, x1: *Tensor, x2: *Tensor) !void {
+        if (tensorsOverlap(x1, x2)) return error.AliasedBuffers;
+        const batch_size = try self.validatePair(x1, x2);
+        var stack_fallback = std.heap.stackFallback(4096, scratchAllocator());
+        const allocator = stack_fallback.get();
+
+        const scale = try allocator.alloc(f32, self.dim);
+        defer allocator.free(scale);
+
+        const trans = try allocator.alloc(f32, self.dim);
+        defer allocator.free(trans);
+
+        var b: usize = 0;
+        while (b < batch_size) : (b += 1) {
+            const x1_row = x1.data[b * self.dim .. b * self.dim + self.dim];
+            const x2_row = x2.data[b * self.dim .. b * self.dim + self.dim];
+
+            self.computeScaleRow(x2_row, scale);
+
+            var i: usize = 0;
+            while (i < self.dim) : (i += 1) x1_row[i] *= scale[i];
+
+            self.computeTranslationRow(x1_row, trans);
+
+            i = 0;
+            while (i < self.dim) : (i += 1) x2_row[i] += trans[i];
+        }
+    }
+```
