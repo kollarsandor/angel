@@ -94,24 +94,27 @@ let rsf_scatter [n] (x: [n]f32) (indices: [n]i64): [n]f32 =
       else x[i]
     )
 
-let rsf_flow [n] (x: [n]f32) (s_weight: [n]f32) (t_weight: [n]f32) (s_bias: [n]f32) (t_bias: [n]f32): [n]f32 =
-  if n < 2 then copy x
-  else
-    let half = n / 2
-    let x_s = tabulate half (\i -> x[i] * s_weight[i] + s_bias[i])
-    let x_t = tabulate half (\i -> x[i + half] * t_weight[i + half] + t_bias[i + half])
-    let combined_lower = map2 (+) x_s x_t
-    let combined_upper = map2 (-) x_s x_t
-    let base = combined_lower ++ combined_upper
-    in tabulate n (\i ->
-      if i < half * 2 then base[i] else x[i]
-    )
+let rsf_flow [half] (x: [half*2]f32) (s_weight: [half][half]f32) (t_weight: [half][half]f32) (s_bias: [half]f32) (t_bias: [half]f32): [half*2]f32 =
+  let d = half * 2
+  let clip_min = -5.0f32
+  let clip_max = 5.0f32
+  let x1 = x[0:half] :> [half]f32
+  let x2 = x[half:d] :> [half]f32
+  let scale = tabulate half (\j ->
+    let raw = s_bias[j] + reduce (+) 0f32 (map2 (*) s_weight[j] x2)
+    let clipped = f32.max clip_min (f32.min clip_max raw)
+    in f32.exp clipped
+  )
+  let y1 = map2 (*) x1 scale
+  let trans = tabulate half (\j ->
+    t_bias[j] + reduce (+) 0f32 (map2 (*) t_weight[j] y1)
+  )
+  let y2 = map2 (+) x2 trans
+  in (y1 ++ y2) :> [half*2]f32
 
-let rsf_forward_layer [n] (x: [n]f32) (s_weight: [n]f32) (t_weight: [n]f32) (s_bias: [n]f32) (t_bias: [n]f32) (perm_indices: [n]i64): [n]f32 =
-  if n < 2 then copy x
-  else
-    let scattered = rsf_scatter x perm_indices
-    in rsf_flow scattered s_weight t_weight s_bias t_bias
+let rsf_forward_layer [half] (x: [half*2]f32) (s_weight: [half][half]f32) (t_weight: [half][half]f32) (s_bias: [half]f32) (t_bias: [half]f32) (perm_indices: [half*2]i64): [half*2]f32 =
+  let scattered = rsf_scatter x perm_indices
+  in rsf_flow scattered s_weight t_weight s_bias t_bias
 
 let rsf_backward_scatter [n] (grad: [n]f32) (indices: [n]i64): [n]f32 =
   if n < 2 then copy grad
@@ -133,40 +136,49 @@ let rsf_backward_scatter [n] (grad: [n]f32) (indices: [n]i64): [n]f32 =
       if i < half * 2 then base[i] else grad[i]
     )
 
-let rsf_backward_flow [n] (grad_out: [n]f32) (x: [n]f32) (s_weight: [n]f32) (t_weight: [n]f32): ([n]f32, [n]f32, [n]f32, [n]f32, [n]f32) =
-  if n < 2 then (copy grad_out, replicate n 0f32, replicate n 0f32, replicate n 0f32, replicate n 0f32)
-  else
-    let half = n / 2
-    let grad_lower = tabulate half (\i -> grad_out[i])
-    let grad_upper = tabulate half (\i -> grad_out[i + half])
-    let grad_sum = map2 (+) grad_lower grad_upper
-    let grad_diff = map2 (-) grad_lower grad_upper
-    let grad_x = tabulate n (\i ->
-      if i < half then grad_sum[i] * s_weight[i]
-      else if i < half * 2 then grad_diff[i - half] * t_weight[i]
-      else grad_out[i]
-    )
-    let grad_s_w = tabulate n (\i ->
-      if i < half then x[i] * grad_sum[i] else 0f32
-    )
-    let grad_t_w = tabulate n (\i ->
-      if i >= half && i < half * 2 then x[i] * grad_diff[i - half] else 0f32
-    )
-    let grad_s_b = tabulate n (\i ->
-      if i < half then grad_sum[i] else 0f32
-    )
-    let grad_t_b = tabulate n (\i ->
-      if i >= half && i < half * 2 then grad_diff[i - half] else 0f32
-    )
-    in (grad_x, grad_s_w, grad_t_w, grad_s_b, grad_t_b)
+let rsf_backward_flow [half] (grad_out: [half*2]f32) (x: [half*2]f32) (s_weight: [half][half]f32) (t_weight: [half][half]f32) (s_bias: [half]f32) (t_bias: [half]f32): ([half*2]f32, [half][half]f32, [half][half]f32, [half]f32, [half]f32) =
+  let d = half * 2
+  let clip_min = -5.0f32
+  let clip_max = 5.0f32
+  let x1 = x[0:half] :> [half]f32
+  let x2 = x[half:d] :> [half]f32
+  let pre_scale = tabulate half (\j ->
+    s_bias[j] + reduce (+) 0f32 (map2 (*) s_weight[j] x2)
+  )
+  let scale = map (\ps ->
+    let clipped = f32.max clip_min (f32.min clip_max ps)
+    in f32.exp clipped
+  ) pre_scale
+  let y1 = map2 (*) x1 scale
+  let dy1 = grad_out[0:half] :> [half]f32
+  let dy2 = grad_out[half:d] :> [half]f32
+  let dy1_total = tabulate half (\j ->
+    dy1[j] + reduce (+) 0f32 (tabulate half (\k -> t_weight[k][j] * dy2[k]))
+  )
+  let ds = tabulate half (\j ->
+    let in_range = pre_scale[j] >= clip_min && pre_scale[j] <= clip_max
+    in if in_range then dy1_total[j] * y1[j] else 0f32
+  )
+  let dx1 = map2 (*) dy1_total scale
+  let dx2 = tabulate half (\j ->
+    dy2[j] + reduce (+) 0f32 (tabulate half (\k -> s_weight[k][j] * ds[k]))
+  )
+  let grad_x = (dx1 ++ dx2) :> [half*2]f32
+  let grad_ws = tabulate half (\j ->
+    tabulate half (\k -> ds[j] * x2[k])
+  )
+  let grad_wt = tabulate half (\j ->
+    tabulate half (\k -> dy2[j] * y1[k])
+  )
+  let grad_sb = copy ds
+  let grad_tb = copy dy2
+  in (grad_x, grad_ws, grad_wt, grad_sb, grad_tb)
 
-let rsf_backward_layer [n] (grad_out: [n]f32) (x: [n]f32) (s_weight: [n]f32) (t_weight: [n]f32) (perm_indices: [n]i64): ([n]f32, [n]f32, [n]f32, [n]f32, [n]f32) =
-  if n < 2 then (copy grad_out, replicate n 0f32, replicate n 0f32, replicate n 0f32, replicate n 0f32)
-  else
-    let scattered_x = rsf_scatter x perm_indices
-    let (grad_flow, grad_s_w, grad_t_w, grad_s_b, grad_t_b) = rsf_backward_flow grad_out scattered_x s_weight t_weight
-    let grad_x = rsf_backward_scatter grad_flow perm_indices
-    in (grad_x, grad_s_w, grad_t_w, grad_s_b, grad_t_b)
+let rsf_backward_layer [half] (grad_out: [half*2]f32) (x: [half*2]f32) (s_weight: [half][half]f32) (t_weight: [half][half]f32) (s_bias: [half]f32) (t_bias: [half]f32) (perm_indices: [half*2]i64): ([half*2]f32, [half][half]f32, [half][half]f32, [half]f32, [half]f32) =
+  let scattered_x = rsf_scatter x perm_indices
+  let (grad_flow, grad_s_w, grad_t_w, grad_s_b, grad_t_b) = rsf_backward_flow grad_out scattered_x s_weight t_weight s_bias t_bias
+  let grad_x = rsf_backward_scatter grad_flow perm_indices
+  in (grad_x, grad_s_w, grad_t_w, grad_s_b, grad_t_b)
 
 let hash_sequence [m] (tokens: [m]u32): u64 =
   loop h = 14695981039346656037u64 for i < m do
@@ -301,8 +313,8 @@ entry select_topk [n] (k: i64) (scores: [n]f32): ([]f32, []i64) =
   let safe_k = i64.max 0 k
   in topk safe_k scores (iota n)
 
-entry rsf_forward [n] (x: [n]f32) (s_w: [n]f32) (t_w: [n]f32) (s_b: [n]f32) (t_b: [n]f32) (perm: [n]i64): [n]f32 = rsf_forward_layer x s_w t_w s_b t_b perm
-entry rsf_backward [n] (grad: [n]f32) (x: [n]f32) (s_w: [n]f32) (t_w: [n]f32) (perm: [n]i64): ([n]f32, [n]f32, [n]f32, [n]f32, [n]f32) = rsf_backward_layer grad x s_w t_w perm
+entry rsf_forward [half] (x: [half*2]f32) (s_w: [half][half]f32) (t_w: [half][half]f32) (s_b: [half]f32) (t_b: [half]f32) (perm: [half*2]i64): [half*2]f32 = rsf_forward_layer x s_w t_w s_b t_b perm
+entry rsf_backward [half] (grad: [half*2]f32) (x: [half*2]f32) (s_w: [half][half]f32) (t_w: [half][half]f32) (s_b: [half]f32) (t_b: [half]f32) (perm: [half*2]i64): ([half*2]f32, [half][half]f32, [half][half]f32, [half]f32, [half]f32) = rsf_backward_layer grad x s_w t_w s_b t_b perm
 
 entry ssi_hash_tokens [m] (tokens: [m]u32): u64 = hash_sequence tokens
 entry ssi_find_nearest [n][m] (tree: [n]u64) (query: [m]u32): i64 = ssi_search tree query

@@ -11,26 +11,31 @@ JAIDE is a from-scratch LLM system built in Zig 0.14.1 using a custom RSF (Relat
 - **Dataset**: HuggingFaceFW/finephrase (auto-downloaded in Modal scripts)
 
 ## GPU Pipeline (Futhark)
-The GPU pipeline in `main.fut` implements the same affin coupling logic as the Zig-side `rsf.zig`:
+All Futhark GPU paths implement the same affine coupling logic as the Zig-side `rsf.zig`:
 1. Split each row into x1 (first half) and x2 (second half)
-2. Scale: s = exp(clip(W_s * x2 + b_s, clip_min, clip_max))
+2. Scale: s = exp(clip(W_s · x2 + b_s, clip_min, clip_max))
 3. y1 = x1 * s (elementwise)
-4. Translation: t = W_t * y1 + b_t
+4. Translation: t = W_t · y1 + b_t
 5. y2 = x2 + t (elementwise)
 6. Output: y1 ++ y2
 
-The backward pass reconstructs inputs from outputs and computes gradients for weights and biases.
+Three GPU paths exist, all consistent:
+- `main.fut`: f16 2D matrix-weight path (called from Zig via futhark_bindings.zig)
+- `futhark_kernels.fut` rsf_flow/rsf_backward_flow: f32 2D matrix-weight path ([half][half] weights)
+- `futhark_kernels.fut` rsf_relational_context: f32 element-wise per-row path (1D weights, diagonal specialization)
+
+The backward pass recomputes forward intermediates and produces gradients for W_s, W_t, s_bias, t_bias with clip-gated scale gradients (zeroed outside clip range).
 
 ## Key Files
 - `build.zig` / `build.zig.zon` - Build system configuration
 - `src/main.zig` - Main entry point, training loop, dataset loading
-- `src/processor/rsf.zig` - RSF model with affin coupling (CPU + GPU dispatch)
-- `src/hw/accel/main.fut` - GPU forward/backward/training (Futhark, affin coupling)
-- `src/hw/accel/futhark_bindings.zig` - Zig bindings for Futhark GPU entries
-- `src/hw/accel/accel_interface.zig` - RSFAccelerator with bias/clip support
-- `src/hw/accel/futhark_kernels.fut` - Standalone GPU kernels (scatter, flow, etc.)
+- `src/processor/rsf.zig` - RSF model with affine coupling (CPU + GPU dispatch)
+- `src/hw/accel/main.fut` - GPU forward/backward/training (Futhark f16, affine coupling with [half][half] matrix weights)
+- `src/hw/accel/futhark_bindings.zig` - Zig bindings for main.fut GPU entries
+- `src/hw/accel/accel_interface.zig` - RSFAccelerator with bias/clip support, GPUOps (matmul only)
+- `src/hw/accel/futhark_kernels.fut` - Standalone GPU kernels (scatter, flow with [half][half] matrix weights, relational context, SSI hashing)
 - `src/tokenizer/mgt.zig` - Custom tokenizer with Hungarian vocabulary
-- `src/distributed/distributed_trainer_futhark.zig` - Distributed GPU training
+- `src/distributed/distributed_trainer_futhark.zig` - Distributed GPU training (checkpoint v3 with s_bias/t_bias/clip serialization)
 
 ## Build Commands
 - `zig build` - Default build (CPU)
